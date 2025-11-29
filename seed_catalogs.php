@@ -122,5 +122,9 @@ function normalize_upper(string $value): string
 
 function normalize_header(string $value): string
 {
-    return mb_strtolower(trim($value), 'UTF-8');
+    // Elimina BOM, comillas y espacios extra
+    $value = preg_replace('/^\xEF\xBB\xBF/', '', $value); // BOM UTF-8
+    $value = trim($value);
+    $value = trim($value, "\"'");
+    return mb_strtolower($value, 'UTF-8');
 }
