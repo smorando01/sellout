@@ -48,9 +48,14 @@ $hoy = new DateTimeImmutable('today');
             <div class="text-uppercase text-muted fw-semibold small">Seguimiento</div>
             <h1 class="h3 mb-0">Créditos Sell Out</h1>
         </div>
-        <button class="btn btn-primary ms-auto" data-bs-toggle="modal" data-bs-target="#registroModal">
-            Nuevo Registro
-        </button>
+        <div class="ms-auto d-flex gap-2">
+            <button class="btn btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#importModal">
+                Importar CSV
+            </button>
+            <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#registroModal">
+                Nuevo Registro
+            </button>
+        </div>
     </div>
 
     <div class="row g-3 mb-4">
@@ -166,7 +171,7 @@ $hoy = new DateTimeImmutable('today');
                     <div class="row g-3">
                         <div class="col-md-4">
                             <label class="form-label">SKU</label>
-                            <input type="text" name="sku" class="form-control" required>
+                            <input type="text" name="sku" class="form-control" list="list_skus" required>
                         </div>
                         <div class="col-md-8">
                             <label class="form-label">Producto</label>
@@ -193,7 +198,7 @@ $hoy = new DateTimeImmutable('today');
                         </div>
                         <div class="col-md-6">
                             <label class="form-label">Proveedor</label>
-                            <input type="text" name="proveedor" class="form-control" required>
+                            <input type="text" name="proveedor" class="form-control" list="list_proveedores" required>
                         </div>
                         <div class="col-md-6">
                             <label class="form-label">Notas</label>
@@ -210,6 +215,37 @@ $hoy = new DateTimeImmutable('today');
     </div>
 </div>
 
+<!-- Modal para importar CSV -->
+<div class="modal fade" id="importModal" tabindex="-1" aria-labelledby="importModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-md modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="importModalLabel">Importar CSV</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+            </div>
+            <form id="formImport" enctype="multipart/form-data" novalidate>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Archivo CSV</label>
+                        <input type="file" name="csv_file" class="form-control" accept=".csv,text/csv" required>
+                        <div class="form-text">
+                            Encabezados esperados: SKU, Nombre del producto, Monto con IVA, Fecha inicio período, Fecha fin período, Proveedor / Marca, Reportada, Sell Out Pago, Notas.
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="submit" class="btn btn-primary">Importar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Listas para autocompletar -->
+<datalist id="list_skus"></datalist>
+<datalist id="list_proveedores"></datalist>
+
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js" integrity="sha384-C6RzsynM9kWDrMNeT87bh95OGNyZPhcTNXj1NW7RuBCsyN/o0jlpcV8Qyq46cDfL" crossorigin="anonymous"></script>
 <script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
@@ -224,6 +260,9 @@ $hoy = new DateTimeImmutable('today');
                 url: 'https://cdn.datatables.net/plug-ins/1.13.6/i18n/es-ES.json'
             }
         });
+
+        cargarSugerencias();
+        activarMayusculas();
 
         // Envío del formulario de nuevo registro
         $('#formRegistro').on('submit', async function (e) {
@@ -251,6 +290,43 @@ $hoy = new DateTimeImmutable('today');
                     title: 'Guardado',
                     text: 'El registro se guardó correctamente.',
                     timer: 1800,
+                    showConfirmButton: false
+                }).then(() => window.location.reload());
+            } catch (error) {
+                Swal.fire({
+                    icon: 'error',
+                    title: 'Error',
+                    text: error.message
+                });
+            } finally {
+                submitBtn.prop('disabled', false);
+            }
+        });
+
+        // Importación masiva CSV
+        $('#formImport').on('submit', async function (e) {
+            e.preventDefault();
+            const form = this;
+            const formData = new FormData(form);
+            const submitBtn = $(form).find('button[type="submit"]');
+
+            submitBtn.prop('disabled', true);
+            try {
+                const response = await fetch('import.php', {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await response.json();
+
+                if (!response.ok || !data.ok) {
+                    throw new Error(data.message || 'No se pudo importar el archivo.');
+                }
+
+                Swal.fire({
+                    icon: 'success',
+                    title: 'Importación completa',
+                    text: `Insertados: ${data.inserted || 0}, Omitidos: ${data.skipped || 0}`,
+                    timer: 2200,
                     showConfirmButton: false
                 }).then(() => window.location.reload());
             } catch (error) {
@@ -321,6 +397,40 @@ $hoy = new DateTimeImmutable('today');
             } else {
                 $row.removeClass('table-danger');
             }
+        }
+
+        async function cargarSugerencias() {
+            try {
+                const response = await fetch('actions.php', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+                    body: 'accion=get_suggestions'
+                });
+                const data = await response.json();
+                if (!response.ok || !data.ok) {
+                    throw new Error(data.message || 'No se pudieron cargar sugerencias.');
+                }
+                const $skuList = $('#list_skus').empty();
+                const $provList = $('#list_proveedores').empty();
+                (data.skus || []).forEach(v => $skuList.append(`<option value="${v}">`));
+                (data.proveedores || []).forEach(v => $provList.append(`<option value="${v}">`));
+            } catch (error) {
+                console.error('Sugerencias:', error);
+            }
+        }
+
+        function activarMayusculas() {
+            const selector = 'input[type="text"], textarea';
+            document.querySelectorAll(selector).forEach((el) => {
+                el.addEventListener('input', () => {
+                    const start = el.selectionStart;
+                    const end = el.selectionEnd;
+                    el.value = el.value.toUpperCase();
+                    if (start !== null && end !== null) {
+                        el.setSelectionRange(start, end);
+                    }
+                });
+            });
         }
     });
 </script>

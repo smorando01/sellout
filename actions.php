@@ -16,6 +16,8 @@ try {
         crearRegistro($pdo);
     } elseif ($accion === 'actualizar_estado') {
         actualizarEstado($pdo);
+    } elseif ($accion === 'get_suggestions') {
+        obtenerSugerencias($pdo);
     } else {
         http_response_code(400);
         echo json_encode(['ok' => false, 'message' => 'Acción no reconocida']);
@@ -28,11 +30,11 @@ try {
 
 function crearRegistro(PDO $pdo): void
 {
-    $sku = trim($_POST['sku'] ?? '');
-    $producto = trim($_POST['producto'] ?? '');
-    $proveedor = trim($_POST['proveedor'] ?? '');
-    $notas = trim($_POST['notas'] ?? '');
-    $moneda = strtoupper(trim($_POST['moneda'] ?? 'UYU'));
+    $sku = normalize_upper($_POST['sku'] ?? '');
+    $producto = normalize_upper($_POST['producto'] ?? '');
+    $proveedor = normalize_upper($_POST['proveedor'] ?? '');
+    $notas = normalize_upper($_POST['notas'] ?? '');
+    $moneda = normalize_upper($_POST['moneda'] ?? 'UYU');
 
     $monto = str_replace(',', '.', $_POST['monto_iva'] ?? '');
     $montoValido = filter_var($monto, FILTER_VALIDATE_FLOAT);
@@ -95,4 +97,24 @@ function actualizarEstado(PDO $pdo): void
     }
 
     echo json_encode(['ok' => true]);
+}
+
+function obtenerSugerencias(PDO $pdo): void
+{
+    $skusStmt = $pdo->query("SELECT DISTINCT sku FROM sellout_credits ORDER BY sku ASC");
+    $proveedoresStmt = $pdo->query("SELECT DISTINCT proveedor FROM sellout_credits ORDER BY proveedor ASC");
+
+    $skus = array_values(array_filter(array_map('normalize_upper', array_column($skusStmt->fetchAll(), 'sku'))));
+    $proveedores = array_values(array_filter(array_map('normalize_upper', array_column($proveedoresStmt->fetchAll(), 'proveedor'))));
+
+    echo json_encode([
+        'ok' => true,
+        'skus' => $skus,
+        'proveedores' => $proveedores,
+    ]);
+}
+
+function normalize_upper(string $value): string
+{
+    return mb_strtoupper(trim($value), 'UTF-8');
 }
