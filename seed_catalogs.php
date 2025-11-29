@@ -7,56 +7,78 @@
 
 require __DIR__ . '/db.php';
 
-if (PHP_SAPI !== 'cli') {
-    fwrite(STDERR, "Ejecuta este script desde la línea de comandos.\n");
-    exit(1);
+// CLI: php seed_catalogs.php archivo.csv
+// Web (solo si sabes lo que haces): seed_catalogs.php?file=archivo.csv
+$isCli = PHP_SAPI === 'cli';
+$file = null;
+if ($isCli) {
+    if ($argc < 2) {
+        fwrite(STDERR, "Uso: php seed_catalogs.php archivo.csv\n");
+        exit(1);
+    }
+    $file = $argv[1];
+} else {
+    $file = $_GET['file'] ?? '';
+    if ($file === '') {
+        http_response_code(400);
+        exit('Falta parámetro ?file=archivo.csv');
+    }
 }
 
-if ($argc < 2) {
-    fwrite(STDERR, "Uso: php seed_catalogs.php archivo.csv\n");
-    exit(1);
-}
-
-$file = $argv[1];
 if (!is_readable($file)) {
-    fwrite(STDERR, "No puedo leer el archivo: {$file}\n");
-    exit(1);
+    $msg = "No puedo leer el archivo: {$file}";
+    if ($isCli) {
+        fwrite(STDERR, $msg . "\n");
+        exit(1);
+    }
+    http_response_code(400);
+    exit($msg);
 }
 
 if (($handle = fopen($file, 'r')) === false) {
-    fwrite(STDERR, "No se pudo abrir el archivo: {$file}\n");
-    exit(1);
+    $msg = "No se pudo abrir el archivo: {$file}";
+    if ($isCli) {
+        fwrite(STDERR, $msg . "\n");
+        exit(1);
+    }
+    http_response_code(500);
+    exit($msg);
 }
 
-$delimiter = detect_delimiter(fgets($handle));
+$delimiter = ';'; // Solo se admite ;
 rewind($handle);
 
 $headers = fgetcsv($handle, 0, $delimiter);
 if ($headers === false) {
-    fwrite(STDERR, "El CSV está vacío.\n");
-    exit(1);
+    $msg = "El CSV está vacío.";
+    if ($isCli) {
+        fwrite(STDERR, $msg . "\n");
+        exit(1);
+    }
+    http_response_code(400);
+    exit($msg);
 }
 
 $headers = array_map('normalize_header', $headers);
 $idxSku = array_search('sku', $headers, true);
 $idxProd = array_search('producto', $headers, true);
-$idxProv = array_search('proveedor', $headers, true);
 
-if ($idxSku === false || $idxProd === false || $idxProv === false) {
-    fwrite(STDERR, "Encabezados requeridos: sku, producto, proveedor.\n");
-    exit(1);
+if ($idxSku === false || $idxProd === false) {
+    $msg = "Encabezados requeridos: sku, producto. (proveedor se carga manual)";
+    if ($isCli) {
+        fwrite(STDERR, $msg . "\n");
+        exit(1);
+    }
+    http_response_code(400);
+    exit($msg);
 }
 
 $insertSku = $pdo->prepare("
     INSERT INTO catalog_skus (sku, producto, proveedor)
     VALUES (:sku, :producto, :proveedor)
-    ON DUPLICATE KEY UPDATE producto = VALUES(producto), proveedor = VALUES(proveedor)
+    ON DUPLICATE KEY UPDATE producto = VALUES(producto)
 ");
-$insertProv = $pdo->prepare("
-    INSERT INTO catalog_proveedores (nombre)
-    VALUES (:nombre)
-    ON DUPLICATE KEY UPDATE nombre = VALUES(nombre)
-");
+$selectProvExisting = $pdo->prepare("SELECT proveedor FROM catalog_skus WHERE sku = :sku LIMIT 1");
 
 $insertedSku = 0;
 $skipped = 0;
@@ -65,14 +87,16 @@ $pdo->beginTransaction();
 while (($row = fgetcsv($handle, 0, $delimiter)) !== false) {
     $sku = normalize_upper($row[$idxSku] ?? '');
     $producto = normalize_upper($row[$idxProd] ?? '');
-    $proveedor = normalize_upper($row[$idxProv] ?? '');
 
-    if ($sku === '' || $producto === '' || $proveedor === '') {
+    if ($sku === '' || $producto === '') {
         $skipped++;
         continue;
     }
 
-    $insertProv->execute([':nombre' => $proveedor]);
+    $selectProvExisting->execute([':sku' => $sku]);
+    $provRow = $selectProvExisting->fetch();
+    $proveedor = $provRow ? normalize_upper($provRow['proveedor']) : 'PENDIENTE';
+
     $insertSku->execute([
         ':sku' => $sku,
         ':producto' => $producto,
@@ -87,6 +111,10 @@ fclose($handle);
 echo "Insertados/actualizados SKUs: {$insertedSku}\n";
 echo "Saltados (faltan datos): {$skipped}\n";
 
+if (!$isCli) {
+    header('Content-Type: text/plain; charset=utf-8');
+}
+
 function normalize_upper(string $value): string
 {
     return mb_strtoupper(trim($value), 'UTF-8');
@@ -95,11 +123,4 @@ function normalize_upper(string $value): string
 function normalize_header(string $value): string
 {
     return mb_strtolower(trim($value), 'UTF-8');
-}
-
-function detect_delimiter(string $line): string
-{
-    $comma = substr_count($line, ',');
-    $semicolon = substr_count($line, ';');
-    return $semicolon > $comma ? ';' : ',';
 }
