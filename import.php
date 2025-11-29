@@ -116,6 +116,10 @@ try {
             continue;
         }
 
+        // Guarda catálogos
+        upsertProveedor($pdo, $proveedor);
+        upsertSku($pdo, $sku, $producto, $proveedor);
+
         $insertStmt->execute([
             ':sku' => $sku,
             ':producto' => $producto,
@@ -185,4 +189,29 @@ function detect_delimiter(string $line): string
     $comma = substr_count($line, ',');
     $semicolon = substr_count($line, ';');
     return $semicolon > $comma ? ';' : ',';
+}
+
+function upsertProveedor(PDO $pdo, string $proveedor): void
+{
+    $stmt = $pdo->prepare("
+        INSERT INTO catalog_proveedores (nombre) VALUES (:nombre)
+        ON DUPLICATE KEY UPDATE nombre = VALUES(nombre)
+    ");
+    $stmt->execute([':nombre' => $proveedor]);
+}
+
+function upsertSku(PDO $pdo, string $sku, string $producto, string $proveedor): void
+{
+    $stmt = $pdo->prepare("
+        INSERT INTO catalog_skus (sku, producto, proveedor)
+        VALUES (:sku, :producto, :proveedor)
+        ON DUPLICATE KEY UPDATE
+            producto = VALUES(producto),
+            proveedor = VALUES(proveedor)
+    ");
+    $stmt->execute([
+        ':sku' => $sku,
+        ':producto' => $producto,
+        ':proveedor' => $proveedor,
+    ]);
 }

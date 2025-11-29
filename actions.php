@@ -18,6 +18,8 @@ try {
         actualizarEstado($pdo);
     } elseif ($accion === 'get_suggestions') {
         obtenerSugerencias($pdo);
+    } elseif ($accion === 'get_sku_info') {
+        obtenerSkuInfo($pdo);
     } else {
         http_response_code(400);
         echo json_encode(['ok' => false, 'message' => 'Acción no reconocida']);
@@ -51,6 +53,10 @@ function crearRegistro(PDO $pdo): void
         echo json_encode(['ok' => false, 'message' => 'Datos incompletos o inválidos.']);
         return;
     }
+
+    // Guardamos en catálogos para uso de autocompletado/recuperación
+    upsertProveedor($pdo, $proveedor);
+    upsertSku($pdo, $sku, $producto, $proveedor);
 
     $stmt = $pdo->prepare("
         INSERT INTO sellout_credits (sku, producto, monto_iva, moneda, fecha_inicio, fecha_fin, proveedor, reportada, sell_out_pago, notas)
@@ -101,11 +107,11 @@ function actualizarEstado(PDO $pdo): void
 
 function obtenerSugerencias(PDO $pdo): void
 {
-    $skusStmt = $pdo->query("SELECT DISTINCT sku FROM sellout_credits ORDER BY sku ASC");
-    $proveedoresStmt = $pdo->query("SELECT DISTINCT proveedor FROM sellout_credits ORDER BY proveedor ASC");
+    $skusStmt = $pdo->query("SELECT DISTINCT sku FROM catalog_skus ORDER BY sku ASC");
+    $proveedoresStmt = $pdo->query("SELECT DISTINCT nombre FROM catalog_proveedores ORDER BY nombre ASC");
 
     $skus = array_values(array_filter(array_map('normalize_upper', array_column($skusStmt->fetchAll(), 'sku'))));
-    $proveedores = array_values(array_filter(array_map('normalize_upper', array_column($proveedoresStmt->fetchAll(), 'proveedor'))));
+    $proveedores = array_values(array_filter(array_map('normalize_upper', array_column($proveedoresStmt->fetchAll(), 'nombre'))));
 
     echo json_encode([
         'ok' => true,
@@ -114,7 +120,60 @@ function obtenerSugerencias(PDO $pdo): void
     ]);
 }
 
+function obtenerSkuInfo(PDO $pdo): void
+{
+    $sku = normalize_upper($_POST['sku'] ?? '');
+    if ($sku === '') {
+        http_response_code(422);
+        echo json_encode(['ok' => false, 'message' => 'SKU requerido']);
+        return;
+    }
+
+    $stmt = $pdo->prepare("SELECT sku, producto, proveedor FROM catalog_skus WHERE sku = :sku LIMIT 1");
+    $stmt->execute([':sku' => $sku]);
+    $row = $stmt->fetch();
+    if (!$row) {
+        echo json_encode(['ok' => true, 'found' => false]);
+        return;
+    }
+
+    echo json_encode([
+        'ok' => true,
+        'found' => true,
+        'data' => [
+            'sku' => normalize_upper($row['sku']),
+            'producto' => normalize_upper($row['producto']),
+            'proveedor' => normalize_upper($row['proveedor']),
+        ],
+    ]);
+}
+
 function normalize_upper(string $value): string
 {
     return mb_strtoupper(trim($value), 'UTF-8');
+}
+
+function upsertProveedor(PDO $pdo, string $proveedor): void
+{
+    $stmt = $pdo->prepare("
+        INSERT INTO catalog_proveedores (nombre) VALUES (:nombre)
+        ON DUPLICATE KEY UPDATE nombre = VALUES(nombre)
+    ");
+    $stmt->execute([':nombre' => $proveedor]);
+}
+
+function upsertSku(PDO $pdo, string $sku, string $producto, string $proveedor): void
+{
+    $stmt = $pdo->prepare("
+        INSERT INTO catalog_skus (sku, producto, proveedor)
+        VALUES (:sku, :producto, :proveedor)
+        ON DUPLICATE KEY UPDATE
+            producto = VALUES(producto),
+            proveedor = VALUES(proveedor)
+    ");
+    $stmt->execute([
+        ':sku' => $sku,
+        ':producto' => $producto,
+        ':proveedor' => $proveedor,
+    ]);
 }

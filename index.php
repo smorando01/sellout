@@ -266,6 +266,7 @@ $hoy = new DateTimeImmutable('today');
 
         cargarSugerencias();
         activarMayusculas();
+        autocompletarSku();
 
         // Envío del formulario de nuevo registro
         $('#formRegistro').on('submit', async function (e) {
@@ -433,6 +434,43 @@ $hoy = new DateTimeImmutable('today');
                         el.setSelectionRange(start, end);
                     }
                 });
+            });
+        }
+
+        function autocompletarSku() {
+            const skuInput = document.querySelector('input[name="sku"]');
+            const productoInput = document.querySelector('input[name="producto"]');
+            const proveedorInput = document.querySelector('input[name="proveedor"]');
+
+            if (!skuInput) return;
+
+            skuInput.addEventListener('blur', async () => {
+                const sku = (skuInput.value || '').trim();
+                if (!sku) return;
+                try {
+                    const payload = new URLSearchParams();
+                    payload.append('accion', 'get_sku_info');
+                    payload.append('sku', sku);
+
+                    const response = await fetch('actions.php', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+                        body: payload.toString()
+                    });
+                    const data = await response.json();
+                    if (!response.ok || !data.ok || !data.found) {
+                        return;
+                    }
+
+                    if (productoInput && (!productoInput.value || productoInput.value.trim() === '')) {
+                        productoInput.value = data.data.producto || '';
+                    }
+                    if (proveedorInput && (!proveedorInput.value || proveedorInput.value.trim() === '')) {
+                        proveedorInput.value = data.data.proveedor || '';
+                    }
+                } catch (error) {
+                    console.error('Autocompletar SKU:', error);
+                }
             });
         }
     });
