@@ -231,6 +231,9 @@ $hoy = new DateTimeImmutable('today');
                         <div class="form-text">
                             Encabezados esperados: SKU, Nombre del producto, Monto con IVA, Fecha inicio período, Fecha fin período, Proveedor / Marca, Reportada, Sell Out Pago, Notas.
                         </div>
+                        <div class="mt-2">
+                            <a class="btn btn-link px-0" href="sample_csv.php" target="_blank" rel="noopener">Descargar CSV de ejemplo</a>
+                        </div>
                     </div>
                 </div>
                 <div class="modal-footer">
