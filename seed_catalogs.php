@@ -59,18 +59,26 @@ if ($headers === false) {
     exit($msg);
 }
 
-$headers = array_map('normalize_header', $headers);
-$idxSku = array_search('sku', $headers, true);
-$idxProd = array_search('producto', $headers, true);
+$headersNorm = array_map('normalize_header', $headers);
+$idxSku = array_search('sku', $headersNorm, true);
+$idxProd = array_search('producto', $headersNorm, true);
+$useHeaderless = false;
 
 if ($idxSku === false || $idxProd === false) {
-    $msg = "Encabezados requeridos: sku;producto (proveedor se carga manual). Detalle headers leídos: [" . implode(' | ', $headers) . "]";
-    if ($isCli) {
-        fwrite(STDERR, $msg . "\n");
-        exit(1);
+    // Si no hay encabezados pero vienen al menos 2 columnas, asumimos que la primera fila ya es datos.
+    if (count($headers) >= 2) {
+        $useHeaderless = true;
+        $idxSku = 0;
+        $idxProd = 1;
+    } else {
+        $msg = "Encabezados requeridos: sku;producto (proveedor se carga manual). Detalle headers leídos: [" . implode(' | ', $headers) . "]";
+        if ($isCli) {
+            fwrite(STDERR, $msg . "\n");
+            exit(1);
+        }
+        http_response_code(400);
+        exit($msg);
     }
-    http_response_code(400);
-    exit($msg);
 }
 
 $insertSku = $pdo->prepare("
@@ -84,6 +92,27 @@ $insertedSku = 0;
 $skipped = 0;
 
 $pdo->beginTransaction();
+
+// Si no hay encabezado, la primera línea ya es dato; procesarla antes del loop.
+if ($useHeaderless) {
+    $row = $headers; // la primera línea leída
+    $sku = normalize_upper($row[$idxSku] ?? '');
+    $producto = normalize_upper($row[$idxProd] ?? '');
+    if ($sku !== '' && $producto !== '') {
+        $selectProvExisting->execute([':sku' => $sku]);
+        $provRow = $selectProvExisting->fetch();
+        $proveedor = $provRow ? normalize_upper($provRow['proveedor']) : 'PENDIENTE';
+        $insertSku->execute([
+            ':sku' => $sku,
+            ':producto' => $producto,
+            ':proveedor' => $proveedor,
+        ]);
+        $insertedSku++;
+    } else {
+        $skipped++;
+    }
+}
+
 while (($row = fgetcsv($handle, 0, $delimiter)) !== false) {
     $sku = normalize_upper($row[$idxSku] ?? '');
     $producto = normalize_upper($row[$idxProd] ?? '');
