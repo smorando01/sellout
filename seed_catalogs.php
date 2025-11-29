@@ -64,7 +64,7 @@ $idxSku = array_search('sku', $headers, true);
 $idxProd = array_search('producto', $headers, true);
 
 if ($idxSku === false || $idxProd === false) {
-    $msg = "Encabezados requeridos: sku, producto. (proveedor se carga manual)";
+    $msg = "Encabezados requeridos: sku;producto (proveedor se carga manual). Detalle headers leídos: [" . implode(' | ', $headers) . "]";
     if ($isCli) {
         fwrite(STDERR, $msg . "\n");
         exit(1);
