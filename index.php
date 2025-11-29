@@ -1,22 +1,33 @@
 <?php
 require __DIR__ . '/db.php';
 
-// Totales para dashboard
-$totalesStmt = $pdo->query("
-    SELECT
-        COALESCE(SUM(CASE WHEN sell_out_pago = 0 THEN monto_iva END), 0) AS total_pendiente,
-        COALESCE(SUM(CASE WHEN sell_out_pago = 0 THEN 1 END), 0) AS casos_abiertos
-    FROM sellout_credits
-");
-$totales = $totalesStmt->fetch() ?: ['total_pendiente' => 0, 'casos_abiertos' => 0];
-
 // Datos de tabla
 $creditosStmt = $pdo->query("
-    SELECT id, sku, producto, monto_iva, fecha_inicio, fecha_fin, proveedor, reportada, sell_out_pago, notas
+    SELECT id, sku, producto, monto_iva, moneda, fecha_inicio, fecha_fin, proveedor, reportada, sell_out_pago, notas
     FROM sellout_credits
     ORDER BY fecha_inicio DESC, id DESC
 ");
 $creditos = $creditosStmt->fetchAll();
+
+$totales = [
+    'UYU' => ['pendiente' => 0],
+    'USD' => ['pendiente' => 0],
+    'casos_abiertos' => 0,
+];
+
+foreach ($creditos as $credito) {
+    $moneda = strtoupper($credito['moneda'] ?? '');
+    if (!in_array($moneda, ['UYU', 'USD'], true)) {
+        $moneda = 'UYU';
+    }
+    if (!isset($totales[$moneda])) {
+        $totales[$moneda] = ['pendiente' => 0];
+    }
+    if ((int) $credito['sell_out_pago'] === 0) {
+        $totales[$moneda]['pendiente'] += (float) $credito['monto_iva'];
+        $totales['casos_abiertos']++;
+    }
+}
 
 $hoy = new DateTimeImmutable('today');
 ?>
@@ -43,17 +54,27 @@ $hoy = new DateTimeImmutable('today');
     </div>
 
     <div class="row g-3 mb-4">
-        <div class="col-md-6">
+        <div class="col-md-4">
             <div class="card shadow-sm">
                 <div class="card-body">
-                    <div class="text-muted small">Total Pendiente de Cobro ($)</div>
+                    <div class="text-muted small">Total Pendiente UYU ($)</div>
                     <div class="display-6 text-success">
-                        <?php echo number_format((float) $totales['total_pendiente'], 2, ',', '.'); ?>
+                        <?php echo number_format((float) ($totales['UYU']['pendiente'] ?? 0), 2, ',', '.'); ?>
                     </div>
                 </div>
             </div>
         </div>
-        <div class="col-md-6">
+        <div class="col-md-4">
+            <div class="card shadow-sm">
+                <div class="card-body">
+                    <div class="text-muted small">Total Pendiente USD (U$D)</div>
+                    <div class="display-6 text-info">
+                        <?php echo number_format((float) ($totales['USD']['pendiente'] ?? 0), 2, ',', '.'); ?>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
             <div class="card shadow-sm">
                 <div class="card-body">
                     <div class="text-muted small">Cantidad de Casos Abiertos</div>
@@ -74,7 +95,8 @@ $hoy = new DateTimeImmutable('today');
                         <th>ID</th>
                         <th>SKU</th>
                         <th>Producto</th>
-                        <th>Monto IVA ($)</th>
+                        <th>Moneda</th>
+                        <th>Monto IVA</th>
                         <th>Fecha Inicio</th>
                         <th>Fecha Fin</th>
                         <th>Proveedor</th>
@@ -86,6 +108,10 @@ $hoy = new DateTimeImmutable('today');
                     <tbody>
                     <?php foreach ($creditos as $credito): ?>
                         <?php
+                        $monedaRow = strtoupper($credito['moneda'] ?? '');
+                        if (!in_array($monedaRow, ['UYU', 'USD'], true)) {
+                            $monedaRow = 'UYU';
+                        }
                         $fechaFin = $credito['fecha_fin'] ? new DateTimeImmutable($credito['fecha_fin']) : null;
                         $vencido = $fechaFin && $fechaFin < $hoy && !(int) $credito['sell_out_pago'];
                         ?>
@@ -95,7 +121,13 @@ $hoy = new DateTimeImmutable('today');
                             <td><?php echo (int) $credito['id']; ?></td>
                             <td><?php echo htmlspecialchars((string) $credito['sku'], ENT_QUOTES, 'UTF-8'); ?></td>
                             <td><?php echo htmlspecialchars((string) $credito['producto'], ENT_QUOTES, 'UTF-8'); ?></td>
-                            <td><?php echo number_format((float) $credito['monto_iva'], 2, ',', '.'); ?></td>
+                            <td><?php echo htmlspecialchars((string) $monedaRow, ENT_QUOTES, 'UTF-8'); ?></td>
+                            <td>
+                                <?php
+                                $simbolo = $monedaRow === 'USD' ? 'U$D ' : '$ ';
+                                echo $simbolo . number_format((float) $credito['monto_iva'], 2, ',', '.');
+                                ?>
+                            </td>
                             <td><?php echo htmlspecialchars((string) $credito['fecha_inicio'], ENT_QUOTES, 'UTF-8'); ?></td>
                             <td><?php echo htmlspecialchars((string) $credito['fecha_fin'], ENT_QUOTES, 'UTF-8'); ?></td>
                             <td><?php echo htmlspecialchars((string) $credito['proveedor'], ENT_QUOTES, 'UTF-8'); ?></td>
@@ -140,15 +172,22 @@ $hoy = new DateTimeImmutable('today');
                             <label class="form-label">Producto</label>
                             <input type="text" name="producto" class="form-control" required>
                         </div>
-                        <div class="col-md-4">
-                            <label class="form-label">Monto IVA ($)</label>
+                        <div class="col-md-3">
+                            <label class="form-label">Moneda</label>
+                            <select name="moneda" class="form-select" required>
+                                <option value="UYU" selected>$ (UYU)</option>
+                                <option value="USD">U$D (USD)</option>
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">Monto IVA</label>
                             <input type="number" name="monto_iva" class="form-control" min="0" step="0.01" required>
                         </div>
-                        <div class="col-md-4">
+                        <div class="col-md-3">
                             <label class="form-label">Fecha Inicio</label>
                             <input type="date" name="fecha_inicio" class="form-control" required>
                         </div>
-                        <div class="col-md-4">
+                        <div class="col-md-3">
                             <label class="form-label">Fecha Fin</label>
                             <input type="date" name="fecha_fin" class="form-control" required>
                         </div>

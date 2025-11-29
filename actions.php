@@ -32,6 +32,7 @@ function crearRegistro(PDO $pdo): void
     $producto = trim($_POST['producto'] ?? '');
     $proveedor = trim($_POST['proveedor'] ?? '');
     $notas = trim($_POST['notas'] ?? '');
+    $moneda = strtoupper(trim($_POST['moneda'] ?? 'UYU'));
 
     $monto = str_replace(',', '.', $_POST['monto_iva'] ?? '');
     $montoValido = filter_var($monto, FILTER_VALIDATE_FLOAT);
@@ -42,21 +43,23 @@ function crearRegistro(PDO $pdo): void
     $fechaInicioValida = DateTime::createFromFormat('Y-m-d', $fechaInicio) !== false;
     $fechaFinValida = DateTime::createFromFormat('Y-m-d', $fechaFin) !== false;
 
-    if ($sku === '' || $producto === '' || $proveedor === '' || $montoValido === false || !$fechaInicioValida || !$fechaFinValida) {
+    $monedasPermitidas = ['UYU', 'USD'];
+    if ($sku === '' || $producto === '' || $proveedor === '' || $montoValido === false || !$fechaInicioValida || !$fechaFinValida || !in_array($moneda, $monedasPermitidas, true)) {
         http_response_code(422);
         echo json_encode(['ok' => false, 'message' => 'Datos incompletos o inválidos.']);
         return;
     }
 
     $stmt = $pdo->prepare("
-        INSERT INTO sellout_credits (sku, producto, monto_iva, fecha_inicio, fecha_fin, proveedor, reportada, sell_out_pago, notas)
-        VALUES (:sku, :producto, :monto_iva, :fecha_inicio, :fecha_fin, :proveedor, 0, 0, :notas)
+        INSERT INTO sellout_credits (sku, producto, monto_iva, moneda, fecha_inicio, fecha_fin, proveedor, reportada, sell_out_pago, notas)
+        VALUES (:sku, :producto, :monto_iva, :moneda, :fecha_inicio, :fecha_fin, :proveedor, 0, 0, :notas)
     ");
 
     $stmt->execute([
         ':sku' => $sku,
         ':producto' => $producto,
         ':monto_iva' => $montoValido,
+        ':moneda' => $moneda,
         ':fecha_inicio' => $fechaInicio,
         ':fecha_fin' => $fechaFin,
         ':proveedor' => $proveedor,
