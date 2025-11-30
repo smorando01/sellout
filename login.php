@@ -12,6 +12,7 @@ if (isset($_SESSION['user'])) {
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Acceso | Sell Out Tracker</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="css/custom.css">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/sweetalert2@11/dist/sweetalert2.min.css">
 </head>
 <body class="bg-light d-flex align-items-center" style="min-height: 100vh;">

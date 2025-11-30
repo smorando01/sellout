@@ -1,0 +1,153 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap');
+
+:root {
+    --bg-base: #070912;
+    --card-grad: linear-gradient(145deg, #0f1423, #12192c);
+    --text-primary: #e7ecff;
+    --text-muted: #a1adcb;
+    --accent-1: #7c5cff;
+    --accent-2: #1fd1f9;
+    --border: #1f2738;
+    --danger: #ff5c8d;
+    --success: #41d3a2;
+    --shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+    --input-bg: rgba(255, 255, 255, 0.04);
+}
+
+* {
+    font-family: 'Space Grotesk', sans-serif !important;
+}
+
+body {
+    background: radial-gradient(circle at 10% 10%, rgba(124, 92, 255, 0.28), transparent 30%),
+                radial-gradient(circle at 90% 0%, rgba(31, 209, 249, 0.28), transparent 28%),
+                var(--bg-base);
+    color: var(--text-primary);
+    min-height: 100vh;
+}
+
+.card {
+    background: var(--card-grad);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    box-shadow: var(--shadow);
+    color: var(--text-primary);
+}
+
+.card .text-muted {
+    color: var(--text-muted) !important;
+}
+
+.btn-primary {
+    background: linear-gradient(120deg, var(--accent-1), var(--accent-2));
+    border: none;
+    color: #0c0c12;
+    font-weight: 700;
+    box-shadow: 0 10px 30px rgba(124, 92, 255, 0.35);
+}
+
+.btn-primary:hover {
+    filter: brightness(1.05);
+}
+
+.btn-primary:active,
+.btn-primary:focus {
+    box-shadow: 0 0 0 0.2rem rgba(124, 92, 255, 0.35);
+}
+
+.form-control,
+.form-select {
+    background: var(--input-bg);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+}
+
+.form-control:focus,
+.form-select:focus {
+    background: var(--input-bg);
+    color: var(--text-primary);
+    border-color: var(--accent-1);
+    box-shadow: 0 0 0 0.2rem rgba(124, 92, 255, 0.25);
+}
+
+.form-control::placeholder {
+    color: var(--text-muted);
+}
+
+.modal-content {
+    background: var(--card-grad);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    color: var(--text-primary);
+    box-shadow: var(--shadow);
+}
+
+/* DataTables */
+table.dataTable {
+    background: transparent;
+    color: var(--text-primary);
+}
+
+table.dataTable thead {
+    background: rgba(255, 255, 255, 0.02);
+    color: var(--text-primary);
+}
+
+table.dataTable tbody tr {
+    border-color: var(--border);
+}
+
+table.dataTable tbody tr:hover {
+    background: rgba(124, 92, 255, 0.08);
+}
+
+table.dataTable td, table.dataTable th {
+    border-color: var(--border) !important;
+}
+
+.dataTables_filter input {
+    background: var(--input-bg);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+}
+
+.dataTables_length select,
+.dataTables_filter input {
+    border-radius: 10px;
+}
+
+/* SweetAlert2 */
+.swal2-popup {
+    background: #12192c !important;
+    color: var(--text-primary) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 16px !important;
+}
+
+.swal2-title {
+    color: var(--text-primary) !important;
+}
+
+.swal2-html-container {
+    color: var(--text-muted) !important;
+}
+
+.swal2-confirm {
+    background: linear-gradient(120deg, var(--accent-1), var(--accent-2)) !important;
+    color: #0c0c12 !important;
+    font-weight: 700 !important;
+    border: none !important;
+    box-shadow: 0 10px 30px rgba(124, 92, 255, 0.35) !important;
+}
+
+.swal2-cancel {
+    background: transparent !important;
+    border: 1px solid var(--border) !important;
+    color: var(--text-primary) !important;
+}
+
+.swal2-input {
+    background: var(--input-bg) !important;
+    border: 1px solid var(--border) !important;
+    color: var(--text-primary) !important;
+}
