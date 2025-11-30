@@ -1,4 +1,5 @@
 <?php
+session_start();
 require __DIR__ . '/db.php';
 
 header('Content-Type: application/json; charset=utf-8');
@@ -12,22 +13,128 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 $accion = $_POST['accion'] ?? '';
 
 try {
-    if ($accion === 'nuevo_registro') {
-        crearRegistro($pdo);
-    } elseif ($accion === 'actualizar_estado') {
-        actualizarEstado($pdo);
-    } elseif ($accion === 'get_suggestions') {
-        obtenerSugerencias($pdo);
-    } elseif ($accion === 'get_sku_info') {
-        obtenerSkuInfo($pdo);
-    } else {
-        http_response_code(400);
-        echo json_encode(['ok' => false, 'message' => 'Acción no reconocida']);
+    switch ($accion) {
+        case 'login':
+            login($pdo);
+            break;
+        case 'logout':
+            logout();
+            break;
+        case 'nuevo_registro':
+            requireLogin();
+            crearRegistro($pdo);
+            break;
+        case 'actualizar_estado':
+            requireLogin();
+            actualizarEstado($pdo);
+            break;
+        case 'reportar_cantidad':
+            requireLogin();
+            reportarCantidad($pdo);
+            break;
+        case 'get_suggestions':
+            requireLogin();
+            obtenerSugerencias($pdo);
+            break;
+        case 'get_sku_info':
+            requireLogin();
+            obtenerSkuInfo($pdo);
+            break;
+        case 'update_credit':
+            requireLogin();
+            actualizarRegistro($pdo);
+            break;
+        case 'delete_credit':
+            requireLogin();
+            eliminarRegistro($pdo);
+            break;
+        case 'add_proveedor':
+            requireLogin();
+            agregarProveedor($pdo);
+            break;
+        case 'delete_proveedor':
+            requireLogin();
+            eliminarProveedor($pdo);
+            break;
+        case 'add_sku':
+            requireLogin();
+            agregarSku($pdo);
+            break;
+        case 'delete_sku':
+            requireLogin();
+            eliminarSku($pdo);
+            break;
+        default:
+            http_response_code(400);
+            echo json_encode(['ok' => false, 'message' => 'Acción no reconocida']);
     }
 } catch (Throwable $e) {
     error_log('Error en actions.php: ' . $e->getMessage());
     http_response_code(500);
     echo json_encode(['ok' => false, 'message' => 'Ocurrió un error inesperado.']);
+}
+
+function login(PDO $pdo): void
+{
+    $email = trim($_POST['email'] ?? '');
+    $password = (string) ($_POST['password'] ?? '');
+
+    if ($email === '' || $password === '') {
+        http_response_code(422);
+        echo json_encode(['ok' => false, 'message' => 'Email y contraseña requeridos.']);
+        return;
+    }
+
+    $stmt = $pdo->prepare("SELECT id, nombre, email, password FROM users WHERE email = :email LIMIT 1");
+    $stmt->execute([':email' => $email]);
+    $user = $stmt->fetch();
+    if (!$user) {
+        http_response_code(401);
+        echo json_encode(['ok' => false, 'message' => 'Credenciales inválidas.']);
+        return;
+    }
+
+    $stored = $user['password'];
+    $valid = false;
+    if (password_verify($password, $stored)) {
+        $valid = true;
+    }
+    if (!$valid) {
+        // Compatibilidad con hash SHA2
+        $sha = hash('sha256', $password);
+        if (hash_equals($stored, $sha)) {
+            $valid = true;
+        }
+    }
+
+    if (!$valid) {
+        http_response_code(401);
+        echo json_encode(['ok' => false, 'message' => 'Credenciales inválidas.']);
+        return;
+    }
+
+    $_SESSION['user'] = [
+        'id' => (int) $user['id'],
+        'nombre' => $user['nombre'],
+        'email' => $user['email'],
+    ];
+
+    echo json_encode(['ok' => true]);
+}
+
+function logout(): void
+{
+    session_destroy();
+    echo json_encode(['ok' => true]);
+}
+
+function requireLogin(): void
+{
+    if (!isset($_SESSION['user'])) {
+        http_response_code(401);
+        echo json_encode(['ok' => false, 'message' => 'No autenticado.']);
+        exit;
+    }
 }
 
 function crearRegistro(PDO $pdo): void
@@ -47,6 +154,7 @@ function crearRegistro(PDO $pdo): void
     $fechaInicioValida = DateTime::createFromFormat('Y-m-d', $fechaInicio) !== false;
     $fechaFinValida = DateTime::createFromFormat('Y-m-d', $fechaFin) !== false;
 
+    $cantidad = filter_input(INPUT_POST, 'cantidad_vendida', FILTER_VALIDATE_INT, ['options' => ['default' => 0, 'min_range' => 0]]);
     $monedasPermitidas = ['UYU', 'USD'];
     if ($sku === '' || $producto === '' || $proveedor === '' || $montoValido === false || !$fechaInicioValida || !$fechaFinValida || !in_array($moneda, $monedasPermitidas, true)) {
         http_response_code(422);
@@ -54,13 +162,12 @@ function crearRegistro(PDO $pdo): void
         return;
     }
 
-    // Guardamos en catálogos para uso de autocompletado/recuperación
     upsertProveedor($pdo, $proveedor);
     upsertSku($pdo, $sku, $producto, $proveedor);
 
     $stmt = $pdo->prepare("
-        INSERT INTO sellout_credits (sku, producto, monto_iva, moneda, fecha_inicio, fecha_fin, proveedor, reportada, sell_out_pago, notas)
-        VALUES (:sku, :producto, :monto_iva, :moneda, :fecha_inicio, :fecha_fin, :proveedor, 0, 0, :notas)
+        INSERT INTO sellout_credits (sku, producto, monto_iva, moneda, cantidad_vendida, fecha_inicio, fecha_fin, proveedor, reportada, sell_out_pago, notas, user_id)
+        VALUES (:sku, :producto, :monto_iva, :moneda, 0, :fecha_inicio, :fecha_fin, :proveedor, 0, 0, :notas, :user_id)
     ");
 
     $stmt->execute([
@@ -72,6 +179,7 @@ function crearRegistro(PDO $pdo): void
         ':fecha_fin' => $fechaFin,
         ':proveedor' => $proveedor,
         ':notas' => $notas,
+        ':user_id' => (int) $_SESSION['user']['id'],
     ]);
 
     echo json_encode(['ok' => true, 'id' => $pdo->lastInsertId()]);
@@ -90,9 +198,51 @@ function actualizarEstado(PDO $pdo): void
         return;
     }
 
-    $stmt = $pdo->prepare("UPDATE sellout_credits SET {$campo} = :valor WHERE id = :id");
-    $stmt->execute([
+    if ($campo === 'reportada' && $valor === 1) {
+        http_response_code(400);
+        echo json_encode(['ok' => false, 'message' => 'Usa la acción reportar_cantidad para reportar.']);
+        return;
+    }
+
+    $sets = "{$campo} = :valor";
+    $params = [
         ':valor' => $valor,
+        ':id' => $id,
+    ];
+
+    if ($campo === 'reportada' && $valor === 0) {
+        $sets .= ", cantidad_vendida = 0";
+    }
+
+    $stmt = $pdo->prepare("UPDATE sellout_credits SET {$sets} WHERE id = :id");
+    $stmt->execute($params);
+
+    if ($stmt->rowCount() === 0) {
+        http_response_code(404);
+        echo json_encode(['ok' => false, 'message' => 'Registro no encontrado.']);
+        return;
+    }
+
+    echo json_encode(['ok' => true]);
+}
+
+function reportarCantidad(PDO $pdo): void
+{
+    $id = filter_input(INPUT_POST, 'id', FILTER_VALIDATE_INT);
+    $cantidad = filter_input(INPUT_POST, 'cantidad', FILTER_VALIDATE_INT);
+    if (!$id || $cantidad === false || $cantidad < 0) {
+        http_response_code(422);
+        echo json_encode(['ok' => false, 'message' => 'Cantidad inválida.']);
+        return;
+    }
+
+    $stmt = $pdo->prepare("
+        UPDATE sellout_credits
+        SET cantidad_vendida = :cantidad, reportada = 1
+        WHERE id = :id
+    ");
+    $stmt->execute([
+        ':cantidad' => $cantidad,
         ':id' => $id,
     ]);
 
@@ -146,6 +296,145 @@ function obtenerSkuInfo(PDO $pdo): void
             'proveedor' => normalize_upper($row['proveedor']),
         ],
     ]);
+}
+
+function actualizarRegistro(PDO $pdo): void
+{
+    $id = filter_input(INPUT_POST, 'id', FILTER_VALIDATE_INT);
+    if (!$id) {
+        http_response_code(422);
+        echo json_encode(['ok' => false, 'message' => 'ID inválido']);
+        return;
+    }
+
+    $sku = normalize_upper($_POST['sku'] ?? '');
+    $producto = normalize_upper($_POST['producto'] ?? '');
+    $proveedor = normalize_upper($_POST['proveedor'] ?? '');
+    $notas = normalize_upper($_POST['notas'] ?? '');
+    $moneda = normalize_upper($_POST['moneda'] ?? 'UYU');
+
+    $monto = str_replace(',', '.', $_POST['monto_iva'] ?? '');
+    $montoValido = filter_var($monto, FILTER_VALIDATE_FLOAT);
+
+    $fechaInicio = $_POST['fecha_inicio'] ?? '';
+    $fechaFin = $_POST['fecha_fin'] ?? '';
+
+    $fechaInicioValida = DateTime::createFromFormat('Y-m-d', $fechaInicio) !== false;
+    $fechaFinValida = DateTime::createFromFormat('Y-m-d', $fechaFin) !== false;
+
+    $monedasPermitidas = ['UYU', 'USD'];
+    if ($sku === '' || $producto === '' || $proveedor === '' || $montoValido === false || !$fechaInicioValida || !$fechaFinValida || !in_array($moneda, $monedasPermitidas, true)) {
+        http_response_code(422);
+        echo json_encode(['ok' => false, 'message' => 'Datos incompletos o inválidos.']);
+        return;
+    }
+
+    upsertProveedor($pdo, $proveedor);
+    upsertSku($pdo, $sku, $producto, $proveedor);
+
+    $stmt = $pdo->prepare("
+        UPDATE sellout_credits
+        SET sku = :sku,
+            producto = :producto,
+            monto_iva = :monto_iva,
+            moneda = :moneda,
+            cantidad_vendida = :cantidad_vendida,
+            fecha_inicio = :fecha_inicio,
+            fecha_fin = :fecha_fin,
+            proveedor = :proveedor,
+            notas = :notas,
+            user_id = :user_id
+        WHERE id = :id
+    ");
+    $stmt->execute([
+        ':sku' => $sku,
+        ':producto' => $producto,
+        ':monto_iva' => $montoValido,
+        ':moneda' => $moneda,
+        ':cantidad_vendida' => $cantidad,
+        ':fecha_inicio' => $fechaInicio,
+        ':fecha_fin' => $fechaFin,
+        ':proveedor' => $proveedor,
+        ':notas' => $notas,
+        ':user_id' => (int) $_SESSION['user']['id'],
+        ':id' => $id,
+    ]);
+
+    echo json_encode(['ok' => true]);
+}
+
+function eliminarRegistro(PDO $pdo): void
+{
+    $id = filter_input(INPUT_POST, 'id', FILTER_VALIDATE_INT);
+    if (!$id) {
+        http_response_code(422);
+        echo json_encode(['ok' => false, 'message' => 'ID inválido']);
+        return;
+    }
+
+    $stmt = $pdo->prepare("DELETE FROM sellout_credits WHERE id = :id");
+    $stmt->execute([':id' => $id]);
+    if ($stmt->rowCount() === 0) {
+        http_response_code(404);
+        echo json_encode(['ok' => false, 'message' => 'Registro no encontrado.']);
+        return;
+    }
+    echo json_encode(['ok' => true]);
+}
+
+function agregarProveedor(PDO $pdo): void
+{
+    $nombre = normalize_upper($_POST['nombre'] ?? '');
+    if ($nombre === '') {
+        http_response_code(422);
+        echo json_encode(['ok' => false, 'message' => 'Nombre requerido']);
+        return;
+    }
+    upsertProveedor($pdo, $nombre);
+    echo json_encode(['ok' => true]);
+}
+
+function eliminarProveedor(PDO $pdo): void
+{
+    $nombre = normalize_upper($_POST['nombre'] ?? '');
+    if ($nombre === '') {
+        http_response_code(422);
+        echo json_encode(['ok' => false, 'message' => 'Nombre requerido']);
+        return;
+    }
+    $stmt = $pdo->prepare("DELETE FROM catalog_proveedores WHERE nombre = :nombre");
+    $stmt->execute([':nombre' => $nombre]);
+    echo json_encode(['ok' => true]);
+}
+
+function agregarSku(PDO $pdo): void
+{
+    $sku = normalize_upper($_POST['sku'] ?? '');
+    $producto = normalize_upper($_POST['producto'] ?? '');
+    $proveedor = normalize_upper($_POST['proveedor'] ?? '');
+
+    if ($sku === '' || $producto === '' || $proveedor === '') {
+        http_response_code(422);
+        echo json_encode(['ok' => false, 'message' => 'Datos incompletos.']);
+        return;
+    }
+
+    upsertProveedor($pdo, $proveedor);
+    upsertSku($pdo, $sku, $producto, $proveedor);
+    echo json_encode(['ok' => true]);
+}
+
+function eliminarSku(PDO $pdo): void
+{
+    $sku = normalize_upper($_POST['sku'] ?? '');
+    if ($sku === '') {
+        http_response_code(422);
+        echo json_encode(['ok' => false, 'message' => 'SKU requerido']);
+        return;
+    }
+    $stmt = $pdo->prepare("DELETE FROM catalog_skus WHERE sku = :sku");
+    $stmt->execute([':sku' => $sku]);
+    echo json_encode(['ok' => true]);
 }
 
 function normalize_upper(string $value): string

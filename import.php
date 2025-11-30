@@ -1,5 +1,12 @@
 <?php
+session_start();
 require __DIR__ . '/db.php';
+
+if (!isset($_SESSION['user'])) {
+    http_response_code(401);
+    echo json_encode(['ok' => false, 'message' => 'No autenticado.']);
+    exit;
+}
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -49,6 +56,7 @@ $map = [
     'proveedor / marca' => 'proveedor',
     'reportada' => 'reportada',
     'sell out pago' => 'sell_out_pago',
+    'cantidad vendida' => 'cantidad_vendida',
     'notas' => 'notas',
 ];
 
@@ -76,8 +84,8 @@ try {
     $pdo->beginTransaction();
 
     $insertStmt = $pdo->prepare("
-        INSERT INTO sellout_credits (sku, producto, monto_iva, moneda, fecha_inicio, fecha_fin, proveedor, reportada, sell_out_pago, notas)
-        VALUES (:sku, :producto, :monto_iva, :moneda, :fecha_inicio, :fecha_fin, :proveedor, :reportada, :sell_out_pago, :notas)
+        INSERT INTO sellout_credits (sku, producto, monto_iva, moneda, cantidad_vendida, fecha_inicio, fecha_fin, proveedor, reportada, sell_out_pago, notas, user_id)
+        VALUES (:sku, :producto, :monto_iva, :moneda, :cantidad_vendida, :fecha_inicio, :fecha_fin, :proveedor, :reportada, :sell_out_pago, :notas, :user_id)
     ");
 
     $dupStmt = $pdo->prepare("
@@ -96,6 +104,7 @@ try {
         $proveedor = normalize_upper($row[$indexes['proveedor']] ?? '');
         $reportada = parse_bool($row[$indexes['reportada']] ?? 'false');
         $pagado = parse_bool($row[$indexes['sell_out_pago']] ?? 'false');
+        $cantidadVendida = isset($indexes['cantidad_vendida']) ? (int) ($row[$indexes['cantidad_vendida']] ?? 0) : 0;
         $notas = isset($indexes['notas']) ? normalize_upper($row[$indexes['notas']] ?? '') : '';
 
         if ($sku === '' || $producto === '' || $proveedor === '' || $monto === null || !valid_date($fechaInicio) || !valid_date($fechaFin)) {
@@ -120,17 +129,25 @@ try {
         upsertProveedor($pdo, $proveedor);
         upsertSku($pdo, $sku, $producto, $proveedor);
 
+        if ($cantidadVendida > 0) {
+            $reportada = 1;
+        } else {
+            $reportada = 0;
+        }
+
         $insertStmt->execute([
             ':sku' => $sku,
             ':producto' => $producto,
             ':monto_iva' => $monto,
             ':moneda' => 'UYU',
+            ':cantidad_vendida' => $cantidadVendida,
             ':fecha_inicio' => $fechaInicio,
             ':fecha_fin' => $fechaFin,
             ':proveedor' => $proveedor,
             ':reportada' => $reportada,
             ':sell_out_pago' => $pagado,
             ':notas' => $notas,
+            ':user_id' => (int) $_SESSION['user']['id'],
         ]);
         $inserted++;
     }

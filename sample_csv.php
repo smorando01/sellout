@@ -16,6 +16,7 @@ $headers = [
     'Proveedor / Marca',
     'Reportada',
     'Sell Out Pago',
+    'Cantidad Vendida',
     'Notas',
 ];
 
@@ -28,6 +29,7 @@ $ejemplo = [
     'PROVEEDOR DEMO',
     'True',
     'False',
+    '10',
     'EJEMPLO DE NOTA',
 ];
 
