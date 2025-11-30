@@ -92,12 +92,13 @@ table.dataTable {
 }
 
 table.dataTable thead {
-    background: rgba(255, 255, 255, 0.02);
+    background: rgba(255, 255, 255, 0.05);
     color: var(--text-primary);
 }
 
 table.dataTable tbody tr {
     border-color: var(--border);
+    background: rgba(255, 255, 255, 0.01);
 }
 
 table.dataTable tbody tr:hover {
@@ -131,6 +132,28 @@ table.dataTable td, table.dataTable th {
     background: linear-gradient(120deg, var(--accent-1), var(--accent-2)) !important;
     color: #0c0c12 !important;
     border: none !important;
+}
+
+/* Tablas generales (Bootstrap) */
+.table {
+    color: var(--text-primary);
+    background: transparent;
+}
+
+.table thead th {
+    border-color: var(--border);
+    color: var(--text-primary);
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.table tbody td {
+    border-color: var(--border);
+    color: var(--text-primary);
+    background: rgba(255, 255, 255, 0.01);
+}
+
+.table-hover tbody tr:hover td {
+    background: rgba(124, 92, 255, 0.08);
 }
 
 /* SweetAlert2 */
