@@ -178,6 +178,29 @@ table.dataTable td, table.dataTable th {
     color: var(--text-primary);
 }
 
+/* File input dark */
+.file-dark {
+    background: rgba(15, 20, 35, 0.7);
+    color: var(--text-primary);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.file-dark::file-selector-button {
+    background: linear-gradient(120deg, var(--accent-1), var(--accent-2));
+    color: #0c0c12;
+    border: none;
+    padding: 6px 12px;
+    border-radius: 10px;
+    margin-right: 10px;
+    cursor: pointer;
+}
+
+/* Vencido */
+.vencido {
+    border-left: 3px solid #ffae00;
+    background: rgba(255, 174, 0, 0.05) !important;
+}
+
 /* Tablas generales (Bootstrap) */
 .table {
     color: var(--text-primary);

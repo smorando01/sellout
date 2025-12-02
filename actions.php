@@ -490,12 +490,41 @@ function confirmarCobro(PDO $pdo): void
         return;
     }
 
+    if (!isset($_FILES['comprobante']) || $_FILES['comprobante']['error'] !== UPLOAD_ERR_OK) {
+        http_response_code(422);
+        echo json_encode(['ok' => false, 'message' => 'Adjunta un comprobante válido.']);
+        return;
+    }
+
+    $file = $_FILES['comprobante'];
+    $allowed = ['pdf', 'jpg', 'jpeg', 'png'];
+    $ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
+    if (!in_array($ext, $allowed, true)) {
+        http_response_code(422);
+        echo json_encode(['ok' => false, 'message' => 'Formato no permitido. Usa PDF/JPG/PNG.']);
+        return;
+    }
+
+    $uploadsDir = __DIR__ . '/uploads';
+    if (!is_dir($uploadsDir)) {
+        mkdir($uploadsDir, 0755, true);
+    }
+    $uniqueName = uniqid('comp_', true) . '.' . $ext;
+    $destPath = $uploadsDir . '/' . $uniqueName;
+    $publicPath = 'uploads/' . $uniqueName;
+
+    if (!move_uploaded_file($file['tmp_name'], $destPath)) {
+        http_response_code(500);
+        echo json_encode(['ok' => false, 'message' => 'No se pudo guardar el archivo.']);
+        return;
+    }
+
     $stmt = $pdo->prepare("
         UPDATE sellout_credits
-        SET sell_out_pago = 1
+        SET sell_out_pago = 1, comprobante_file = :file
         WHERE id = :id AND reportada = 1 AND sell_out_pago = 0
     ");
-    $stmt->execute([':id' => $id]);
+    $stmt->execute([':id' => $id, ':file' => $publicPath]);
 
     if ($stmt->rowCount() === 0) {
         http_response_code(404);
@@ -503,7 +532,7 @@ function confirmarCobro(PDO $pdo): void
         return;
     }
 
-    echo json_encode(['ok' => true]);
+    echo json_encode(['ok' => true, 'file' => $publicPath]);
 }
 
 function normalize_upper(string $value): string

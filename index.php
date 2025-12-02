@@ -8,7 +8,7 @@ if (!isset($_SESSION['user'])) {
 require __DIR__ . '/db.php';
 
 $creditosStmt = $pdo->query("
-    SELECT id, sku, producto, monto_iva, moneda, cantidad_vendida, fecha_inicio, fecha_fin, proveedor, reportada, sell_out_pago, notas
+    SELECT id, sku, producto, monto_iva, moneda, cantidad_vendida, fecha_inicio, fecha_fin, proveedor, reportada, sell_out_pago, notas, comprobante_file
     FROM sellout_credits
     ORDER BY fecha_inicio DESC, id DESC
 ");
@@ -127,6 +127,7 @@ foreach ($creditos as $c) {
                                 <th>Producto</th>
                                 <th>Monto IVA</th>
                                 <th>Moneda</th>
+                                <th>Fecha Inicio</th>
                                 <th>Fecha Fin</th>
                                 <th>Proveedor</th>
                                 <th>Acción</th>
@@ -134,12 +135,16 @@ foreach ($creditos as $c) {
                             </thead>
                             <tbody>
                             <?php foreach ($negociacion as $c): ?>
-                                <tr data-id="<?php echo (int) $c['id']; ?>">
+                                <?php
+                                $vencido = $c['fecha_fin'] && new DateTimeImmutable($c['fecha_fin']) < $hoy;
+                                ?>
+                                <tr data-id="<?php echo (int) $c['id']; ?>" class="<?php echo $vencido ? 'vencido' : ''; ?>">
                                     <td><?php echo (int) $c['id']; ?></td>
                                     <td><?php echo htmlspecialchars($c['sku'], ENT_QUOTES, 'UTF-8'); ?></td>
                                     <td><?php echo htmlspecialchars($c['producto'], ENT_QUOTES, 'UTF-8'); ?></td>
                                     <td><?php echo number_format((float) $c['monto_iva'], 2, ',', '.'); ?></td>
                                     <td><?php echo htmlspecialchars($c['moneda'], ENT_QUOTES, 'UTF-8'); ?></td>
+                                    <td><?php echo htmlspecialchars($c['fecha_inicio'], ENT_QUOTES, 'UTF-8'); ?></td>
                                     <td><?php echo htmlspecialchars($c['fecha_fin'], ENT_QUOTES, 'UTF-8'); ?></td>
                                     <td><?php echo htmlspecialchars($c['proveedor'], ENT_QUOTES, 'UTF-8'); ?></td>
                                     <td><button class="btn btn-sm btn-primary btn-reportar" data-id="<?php echo (int) $c['id']; ?>">Reportar Venta</button></td>
@@ -167,6 +172,7 @@ foreach ($creditos as $c) {
                                 <th>Producto</th>
                                 <th>Cant. Vendida</th>
                                 <th>Total a Cobrar</th>
+                                <th>Fecha Inicio</th>
                                 <th>Fecha Fin</th>
                                 <th>Proveedor</th>
                                 <th>Acción</th>
@@ -181,6 +187,7 @@ foreach ($creditos as $c) {
                                     <td><?php echo htmlspecialchars($c['producto'], ENT_QUOTES, 'UTF-8'); ?></td>
                                     <td><?php echo (int) $c['cantidad_vendida']; ?></td>
                                     <td><?php echo $simbolo . number_format((float) $c['total_calculado'], 2, ',', '.'); ?></td>
+                                    <td><?php echo htmlspecialchars($c['fecha_inicio'], ENT_QUOTES, 'UTF-8'); ?></td>
                                     <td><?php echo htmlspecialchars($c['fecha_fin'], ENT_QUOTES, 'UTF-8'); ?></td>
                                     <td><?php echo htmlspecialchars($c['proveedor'], ENT_QUOTES, 'UTF-8'); ?></td>
                                     <td><button class="btn btn-sm btn-primary btn-cobro" data-id="<?php echo (int) $c['id']; ?>">Confirmar Cobro</button></td>
@@ -207,6 +214,7 @@ foreach ($creditos as $c) {
                                 <th>Total</th>
                                 <th>Fecha Fin</th>
                                 <th>Proveedor</th>
+                                <th>Comprobante</th>
                             </tr>
                             </thead>
                             <tbody>
@@ -220,6 +228,13 @@ foreach ($creditos as $c) {
                                     <td><?php echo $simbolo . number_format((float) $c['total_calculado'], 2, ',', '.'); ?></td>
                                     <td><?php echo htmlspecialchars($c['fecha_fin'], ENT_QUOTES, 'UTF-8'); ?></td>
                                     <td><?php echo htmlspecialchars($c['proveedor'], ENT_QUOTES, 'UTF-8'); ?></td>
+                                    <td>
+                                        <?php if (!empty($c['comprobante_file'])): ?>
+                                            <a class="btn btn-sm btn-outline-info" href="<?php echo htmlspecialchars($c['comprobante_file'], ENT_QUOTES, 'UTF-8'); ?>" target="_blank" rel="noopener">Ver Comprobante</a>
+                                        <?php else: ?>
+                                            <span class="text-muted small">Sin archivo</span>
+                                        <?php endif; ?>
+                                    </td>
                                 </tr>
                             <?php endforeach; ?>
                             </tbody>
@@ -362,6 +377,32 @@ foreach ($creditos as $c) {
 <datalist id="list_skus"></datalist>
 <datalist id="list_proveedores"></datalist>
 
+<!-- Modal Cobro con comprobante -->
+<div class="modal fade" id="cobroModal" tabindex="-1" aria-labelledby="cobroModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-md modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="cobroModalLabel">Confirmar Cobro</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+            </div>
+            <form id="formCobro" enctype="multipart/form-data">
+                <input type="hidden" name="id" value="">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Adjuntar Nota de Crédito (PDF/JPG/PNG)</label>
+                        <input type="file" name="comprobante" class="form-control file-dark" accept=".pdf,image/*" required>
+                        <div class="form-text">Este archivo se almacenará como evidencia del cobro.</div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="submit" class="btn btn-primary">Guardar y Confirmar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11/dist/sweetalert2.all.min.js"></script>
@@ -463,27 +504,28 @@ foreach ($creditos as $c) {
         // Confirmar cobro (Tab deuda)
         $('.btn-cobro').on('click', async function () {
             const id = $(this).data('id');
-            const conf = await Swal.fire({
-                icon: 'question',
-                title: 'Confirmar cobro',
-                text: '¿Marcar este acuerdo como pagado?',
-                showCancelButton: true,
-                confirmButtonText: 'Sí, confirmar',
-                cancelButtonText: 'Cancelar'
-            });
-            if (!conf.isConfirmed) return;
+            $('#formCobro input[name="id"]').val(id);
+            const modal = new bootstrap.Modal(document.getElementById('cobroModal'));
+            modal.show();
+        });
+
+        $('#formCobro').on('submit', async function (e) {
+            e.preventDefault();
+            const form = this;
+            const formData = new FormData(form);
+            formData.append('accion', 'confirmar_cobro');
+            const btn = $(form).find('button[type="submit"]');
+            btn.prop('disabled', true);
             try {
-                const response = await fetch('actions.php', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-                    body: `accion=confirmar_cobro&id=${id}`
-                });
+                const response = await fetch('actions.php', {method: 'POST', body: formData});
                 const data = await response.json();
                 if (!response.ok || !data.ok) throw new Error(data.message || 'No se pudo confirmar cobro.');
                 Swal.fire({icon: 'success', title: 'Cobrado', timer: 1000, showConfirmButton: false})
                     .then(() => window.location.reload());
             } catch (error) {
                 Swal.fire({icon: 'error', title: 'Error', text: error.message});
+            } finally {
+                btn.prop('disabled', false);
             }
         });
 
