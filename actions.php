@@ -68,6 +68,10 @@ try {
             requireLogin();
             obtenerDetallesProveedor($pdo);
             break;
+        case 'confirmar_cobro':
+            requireLogin();
+            confirmarCobro($pdo);
+            break;
         default:
             http_response_code(400);
             echo json_encode(['ok' => false, 'message' => 'Acción no reconocida']);
@@ -475,6 +479,31 @@ function obtenerDetallesProveedor(PDO $pdo): void
     }
 
     echo json_encode(['ok' => true, 'items' => $items]);
+}
+
+function confirmarCobro(PDO $pdo): void
+{
+    $id = filter_input(INPUT_POST, 'id', FILTER_VALIDATE_INT);
+    if (!$id) {
+        http_response_code(422);
+        echo json_encode(['ok' => false, 'message' => 'ID inválido']);
+        return;
+    }
+
+    $stmt = $pdo->prepare("
+        UPDATE sellout_credits
+        SET sell_out_pago = 1
+        WHERE id = :id AND reportada = 1 AND sell_out_pago = 0
+    ");
+    $stmt->execute([':id' => $id]);
+
+    if ($stmt->rowCount() === 0) {
+        http_response_code(404);
+        echo json_encode(['ok' => false, 'message' => 'No se pudo confirmar cobro (verifica estado).']);
+        return;
+    }
+
+    echo json_encode(['ok' => true]);
 }
 
 function normalize_upper(string $value): string

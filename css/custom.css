@@ -157,6 +157,27 @@ table.dataTable td, table.dataTable th {
     color: var(--text-muted);
 }
 
+/* Tabs estilo glass/pill */
+.glass-pills .nav-link {
+    border-radius: 999px;
+    padding: 10px 16px;
+    margin-right: 8px;
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--text-muted);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.25);
+}
+
+.glass-pills .nav-link.active {
+    background: linear-gradient(120deg, var(--accent-1), var(--accent-2));
+    color: #0c0c12;
+    border: none;
+}
+
+.glass-pills .nav-link:hover:not(.active) {
+    color: var(--text-primary);
+}
+
 /* Tablas generales (Bootstrap) */
 .table {
     color: var(--text-primary);

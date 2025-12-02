@@ -7,7 +7,6 @@ if (!isset($_SESSION['user'])) {
 
 require __DIR__ . '/db.php';
 
-// Datos principales
 $creditosStmt = $pdo->query("
     SELECT id, sku, producto, monto_iva, moneda, cantidad_vendida, fecha_inicio, fecha_fin, proveedor, reportada, sell_out_pago, notas
     FROM sellout_credits
@@ -15,45 +14,36 @@ $creditosStmt = $pdo->query("
 ");
 $creditos = $creditosStmt->fetchAll();
 
-$kpis = [
-    'pendiente' => 0,
-    'cobrado' => 0,
-    'abiertos' => 0,
-];
+$hoy = new DateTimeImmutable('today');
+$mesActualInicio = new DateTimeImmutable('first day of this month');
+$mesActualFin = new DateTimeImmutable('last day of this month');
 
-$resumenProveedores = [];
+$negociacion = [];
+$deuda = [];
+$finalizados = [];
+$kpis = ['potencial' => 0, 'deuda' => 0.0, 'recupero' => 0.0];
 
-foreach ($creditos as &$c) {
+foreach ($creditos as $c) {
     $moneda = in_array(strtoupper($c['moneda']), ['USD', 'UYU'], true) ? strtoupper($c['moneda']) : 'UYU';
     $cantidad = (int) $c['cantidad_vendida'];
     $total = (float) $c['monto_iva'] * $cantidad;
     $c['moneda'] = $moneda;
     $c['total_calculado'] = $total;
 
-    $provKey = $c['proveedor'] ?: 'SIN PROVEEDOR';
-    if (!isset($resumenProveedores[$provKey])) {
-        $resumenProveedores[$provKey] = [
-            'unidades' => 0,
-            'pendiente' => 0.0,
-            'cobrado' => 0.0,
-        ];
-    }
-    $resumenProveedores[$provKey]['unidades'] += $cantidad;
     if ((int) $c['sell_out_pago'] === 1) {
-        $resumenProveedores[$provKey]['cobrado'] += $total;
-        $kpis['cobrado'] += $total;
-    } else {
-        $kpis['abiertos']++;
-        if ((int) $c['reportada'] === 1) {
-            $resumenProveedores[$provKey]['pendiente'] += $total;
-            $kpis['pendiente'] += $total;
+        $finalizados[] = $c;
+        $fechaFin = $c['fecha_fin'] ? new DateTimeImmutable($c['fecha_fin']) : null;
+        if ($fechaFin && $fechaFin >= $mesActualInicio && $fechaFin <= $mesActualFin) {
+            $kpis['recupero'] += $total;
         }
+    } elseif ((int) $c['reportada'] === 1) {
+        $deuda[] = $c;
+        $kpis['deuda'] += $total;
+    } else {
+        $negociacion[] = $c;
+        $kpis['potencial']++;
     }
 }
-unset($c);
-
-$proveedoresLista = array_keys($resumenProveedores);
-$hoy = new DateTimeImmutable('today');
 ?>
 <!doctype html>
 <html lang="es">
@@ -63,10 +53,9 @@ $hoy = new DateTimeImmutable('today');
     <title>Sell Out Tracker</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="css/custom.css">
-    <link rel="stylesheet" href="https://cdn.datatables.net/1.13.6/css/dataTables.bootstrap5.min.css">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/sweetalert2@11/dist/sweetalert2.min.css">
 </head>
-<body class="bg-light">
+<body>
 <div class="container-fluid py-3">
     <div class="d-flex align-items-center mb-3">
         <div>
@@ -86,160 +75,163 @@ $hoy = new DateTimeImmutable('today');
         <div class="col-md-4">
             <div class="card shadow-sm">
                 <div class="card-body">
-                    <div class="text-muted small">Total Pendiente de Cobro</div>
-                    <div class="display-6 text-success">
-                        <?php echo number_format($kpis['pendiente'], 2, ',', '.'); ?>
-                    </div>
+                    <div class="text-muted small">Potencial en Negociación</div>
+                    <div class="display-6 text-info"><?php echo (int) $kpis['potencial']; ?></div>
                 </div>
             </div>
         </div>
         <div class="col-md-4">
             <div class="card shadow-sm">
                 <div class="card-body">
-                    <div class="text-muted small">Total Cobrado</div>
-                    <div class="display-6 text-info">
-                        <?php echo number_format($kpis['cobrado'], 2, ',', '.'); ?>
-                    </div>
+                    <div class="text-muted small">Deuda Exigible</div>
+                    <div class="display-6 text-success"><?php echo number_format($kpis['deuda'], 2, ',', '.'); ?></div>
                 </div>
             </div>
         </div>
         <div class="col-md-4">
             <div class="card shadow-sm">
                 <div class="card-body">
-                    <div class="text-muted small">Acuerdos Abiertos</div>
-                    <div class="display-6 text-primary">
-                        <?php echo (int) $kpis['abiertos']; ?>
+                    <div class="text-muted small">Recupero del Mes</div>
+                    <div class="display-6 text-primary"><?php echo number_format($kpis['recupero'], 2, ',', '.'); ?></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <ul class="nav nav-pills glass-pills mb-3" id="tabsSellout" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link active" id="tab-negociacion" data-bs-toggle="pill" data-bs-target="#pane-negociacion" type="button" role="tab">Acuerdos Vigentes</button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="tab-deuda" data-bs-toggle="pill" data-bs-target="#pane-deuda" type="button" role="tab">Gestión de Cobro</button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="tab-final" data-bs-toggle="pill" data-bs-target="#pane-final" type="button" role="tab">Historial Finalizado</button>
+        </li>
+    </ul>
+
+    <div class="tab-content" id="tabsSelloutContent">
+        <div class="tab-pane fade show active" id="pane-negociacion" role="tabpanel">
+            <div class="card shadow-sm">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <h6 class="fw-semibold mb-0">Acuerdos Vigentes (Negociación)</h6>
+                        <small class="text-muted">Reporta la cantidad cuando cierre el periodo.</small>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table align-middle">
+                            <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>SKU</th>
+                                <th>Producto</th>
+                                <th>Monto IVA</th>
+                                <th>Moneda</th>
+                                <th>Fecha Fin</th>
+                                <th>Proveedor</th>
+                                <th>Acción</th>
+                            </tr>
+                            </thead>
+                            <tbody>
+                            <?php foreach ($negociacion as $c): ?>
+                                <tr data-id="<?php echo (int) $c['id']; ?>">
+                                    <td><?php echo (int) $c['id']; ?></td>
+                                    <td><?php echo htmlspecialchars($c['sku'], ENT_QUOTES, 'UTF-8'); ?></td>
+                                    <td><?php echo htmlspecialchars($c['producto'], ENT_QUOTES, 'UTF-8'); ?></td>
+                                    <td><?php echo number_format((float) $c['monto_iva'], 2, ',', '.'); ?></td>
+                                    <td><?php echo htmlspecialchars($c['moneda'], ENT_QUOTES, 'UTF-8'); ?></td>
+                                    <td><?php echo htmlspecialchars($c['fecha_fin'], ENT_QUOTES, 'UTF-8'); ?></td>
+                                    <td><?php echo htmlspecialchars($c['proveedor'], ENT_QUOTES, 'UTF-8'); ?></td>
+                                    <td><button class="btn btn-sm btn-primary btn-reportar" data-id="<?php echo (int) $c['id']; ?>">Reportar Venta</button></td>
+                                </tr>
+                            <?php endforeach; ?>
+                            </tbody>
+                        </table>
                     </div>
                 </div>
             </div>
         </div>
-    </div>
-
-    <div class="card shadow-sm mb-3">
-        <div class="card-body">
-            <h6 class="fw-semibold mb-3">Resumen por Proveedor</h6>
-            <div class="table-responsive">
-                <table class="table table-sm table-bordered align-middle mb-0">
-                    <thead class="table-light">
-                    <tr>
-                        <th>Proveedor</th>
-                        <th class="text-end">Unidades</th>
-                        <th class="text-end">Pendiente</th>
-                        <th class="text-end">Cobrado</th>
-                    </tr>
-                    </thead>
-                    <tbody>
-                    <?php foreach ($resumenProveedores as $prov => $r): ?>
-                        <tr>
-                            <td><?php echo htmlspecialchars($prov, ENT_QUOTES, 'UTF-8'); ?></td>
-                            <td class="text-end"><?php echo (int) $r['unidades']; ?></td>
-                            <td class="text-end">
-                                <a href="#" class="link-light link-offset-1 text-decoration-none provider-detail" data-proveedor="<?php echo htmlspecialchars($prov, ENT_QUOTES, 'UTF-8'); ?>" data-estado="pendiente">
-                                    <?php echo number_format($r['pendiente'], 2, ',', '.'); ?>
-                                </a>
-                            </td>
-                            <td class="text-end">
-                                <a href="#" class="link-light link-offset-1 text-decoration-none provider-detail" data-proveedor="<?php echo htmlspecialchars($prov, ENT_QUOTES, 'UTF-8'); ?>" data-estado="pagado">
-                                    <?php echo number_format($r['cobrado'], 2, ',', '.'); ?>
-                                </a>
-                            </td>
-                        </tr>
-                    <?php endforeach; ?>
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    </div>
-
-    <div class="card shadow-sm">
-        <div class="card-body">
-            <div class="d-flex align-items-center mb-2">
-                <h6 class="fw-semibold mb-0">Créditos</h6>
-                <div class="ms-auto d-flex align-items-center gap-2">
-                    <label class="small text-muted mb-0">Filtrar por Proveedor</label>
-                    <select id="filtroProveedor" class="form-select form-select-sm" style="min-width: 200px;">
-                        <option value="">Todos</option>
-                        <?php foreach ($proveedoresLista as $prov): ?>
-                            <option value="<?php echo htmlspecialchars($prov, ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($prov, ENT_QUOTES, 'UTF-8'); ?></option>
-                        <?php endforeach; ?>
-                    </select>
+        <div class="tab-pane fade" id="pane-deuda" role="tabpanel">
+            <div class="card shadow-sm">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <h6 class="fw-semibold mb-0">Gestión de Cobro (Deuda)</h6>
+                        <small class="text-muted">Total a Cobrar visible en la tabla.</small>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table align-middle">
+                            <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>SKU</th>
+                                <th>Producto</th>
+                                <th>Cant. Vendida</th>
+                                <th>Total a Cobrar</th>
+                                <th>Fecha Fin</th>
+                                <th>Proveedor</th>
+                                <th>Acción</th>
+                            </tr>
+                            </thead>
+                            <tbody>
+                            <?php foreach ($deuda as $c): ?>
+                                <?php $simbolo = $c['moneda'] === 'USD' ? 'U$D ' : '$ '; ?>
+                                <tr data-id="<?php echo (int) $c['id']; ?>">
+                                    <td><?php echo (int) $c['id']; ?></td>
+                                    <td><?php echo htmlspecialchars($c['sku'], ENT_QUOTES, 'UTF-8'); ?></td>
+                                    <td><?php echo htmlspecialchars($c['producto'], ENT_QUOTES, 'UTF-8'); ?></td>
+                                    <td><?php echo (int) $c['cantidad_vendida']; ?></td>
+                                    <td><?php echo $simbolo . number_format((float) $c['total_calculado'], 2, ',', '.'); ?></td>
+                                    <td><?php echo htmlspecialchars($c['fecha_fin'], ENT_QUOTES, 'UTF-8'); ?></td>
+                                    <td><?php echo htmlspecialchars($c['proveedor'], ENT_QUOTES, 'UTF-8'); ?></td>
+                                    <td><button class="btn btn-sm btn-primary btn-cobro" data-id="<?php echo (int) $c['id']; ?>">Confirmar Cobro</button></td>
+                                </tr>
+                            <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
-            <div class="table-responsive">
-                <table id="creditsTable" class="table table-striped align-middle">
-                    <thead>
-                    <tr>
-                        <th>ID</th>
-                        <th>SKU</th>
-                        <th>Producto</th>
-                        <th>Moneda</th>
-                        <th>Monto IVA</th>
-                        <th>Cant. Vendida</th>
-                        <th>Total</th>
-                        <th>Fecha Inicio</th>
-                        <th>Fecha Fin</th>
-                        <th>Proveedor</th>
-                        <th>Reportada</th>
-                        <th>Sell Out Pago</th>
-                        <th>Notas</th>
-                        <th>Acciones</th>
-                    </tr>
-                    </thead>
-                    <tbody>
-                    <?php foreach ($creditos as $c): ?>
-                        <?php
-                        $fechaFinObj = $c['fecha_fin'] ? new DateTimeImmutable($c['fecha_fin']) : null;
-                        $vencido = $fechaFinObj && $fechaFinObj < $hoy && !(int) $c['sell_out_pago'];
-                        $monedaRow = $c['moneda'];
-                        $simbolo = $monedaRow === 'USD' ? 'U$D ' : '$ ';
-                        ?>
-                        <tr class="<?php echo $vencido ? 'table-danger' : ''; ?>"
-                            data-id="<?php echo (int) $c['id']; ?>"
-                            data-sku="<?php echo htmlspecialchars($c['sku'], ENT_QUOTES, 'UTF-8'); ?>"
-                            data-producto="<?php echo htmlspecialchars($c['producto'], ENT_QUOTES, 'UTF-8'); ?>"
-                            data-moneda="<?php echo htmlspecialchars($monedaRow, ENT_QUOTES, 'UTF-8'); ?>"
-                            data-monto="<?php echo htmlspecialchars($c['monto_iva'], ENT_QUOTES, 'UTF-8'); ?>"
-                            data-cantidad="<?php echo (int) $c['cantidad_vendida']; ?>"
-                            data-fecha-inicio="<?php echo htmlspecialchars($c['fecha_inicio'], ENT_QUOTES, 'UTF-8'); ?>"
-                            data-fecha-fin="<?php echo htmlspecialchars($c['fecha_fin'], ENT_QUOTES, 'UTF-8'); ?>"
-                            data-proveedor="<?php echo htmlspecialchars($c['proveedor'], ENT_QUOTES, 'UTF-8'); ?>"
-                            data-notas="<?php echo htmlspecialchars($c['notas'], ENT_QUOTES, 'UTF-8'); ?>"
-                            data-fecha-fin-raw="<?php echo htmlspecialchars($c['fecha_fin'], ENT_QUOTES, 'UTF-8'); ?>">
-                            <td><?php echo (int) $c['id']; ?></td>
-                            <td><?php echo htmlspecialchars($c['sku'], ENT_QUOTES, 'UTF-8'); ?></td>
-                            <td><?php echo htmlspecialchars($c['producto'], ENT_QUOTES, 'UTF-8'); ?></td>
-                            <td><?php echo htmlspecialchars($monedaRow, ENT_QUOTES, 'UTF-8'); ?></td>
-                            <td><?php echo $simbolo . number_format((float) $c['monto_iva'], 2, ',', '.'); ?></td>
-                            <td class="text-end"><?php echo (int) $c['cantidad_vendida']; ?></td>
-                            <td><?php echo $simbolo . number_format((float) $c['total_calculado'], 2, ',', '.'); ?></td>
-                            <td><?php echo htmlspecialchars($c['fecha_inicio'], ENT_QUOTES, 'UTF-8'); ?></td>
-                            <td><?php echo htmlspecialchars($c['fecha_fin'], ENT_QUOTES, 'UTF-8'); ?></td>
-                            <td><?php echo htmlspecialchars($c['proveedor'], ENT_QUOTES, 'UTF-8'); ?></td>
-                            <td class="text-center">
-                                <button type="button" class="btn btn-sm pill-status pill-reportada <?php echo $c['reportada'] ? 'pill-on' : 'pill-off'; ?>" data-state="<?php echo (int) $c['reportada']; ?>">
-                                    <?php echo $c['reportada'] ? 'Listo' : 'Pendiente'; ?>
-                                </button>
-                            </td>
-                            <td class="text-center">
-                                <button type="button" class="btn btn-sm pill-status pill-pago <?php echo $c['sell_out_pago'] ? 'pill-on' : 'pill-off'; ?>" data-state="<?php echo (int) $c['sell_out_pago']; ?>">
-                                    <?php echo $c['sell_out_pago'] ? 'Pagado' : 'Pendiente'; ?>
-                                </button>
-                            </td>
-                            <td><?php echo htmlspecialchars($c['notas'], ENT_QUOTES, 'UTF-8'); ?></td>
-                            <td>
-                                <button class="btn btn-sm btn-outline-primary btn-edit">✏️</button>
-                                <button class="btn btn-sm btn-outline-danger btn-delete">🗑️</button>
-                            </td>
-                        </tr>
-                    <?php endforeach; ?>
-                    </tbody>
-                </table>
+        </div>
+        <div class="tab-pane fade" id="pane-final" role="tabpanel">
+            <div class="card shadow-sm">
+                <div class="card-body">
+                    <h6 class="fw-semibold mb-2">Historial Finalizado</h6>
+                    <div class="table-responsive">
+                        <table class="table align-middle">
+                            <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>SKU</th>
+                                <th>Producto</th>
+                                <th>Cant. Vendida</th>
+                                <th>Total</th>
+                                <th>Fecha Fin</th>
+                                <th>Proveedor</th>
+                            </tr>
+                            </thead>
+                            <tbody>
+                            <?php foreach ($finalizados as $c): ?>
+                                <?php $simbolo = $c['moneda'] === 'USD' ? 'U$D ' : '$ '; ?>
+                                <tr>
+                                    <td><?php echo (int) $c['id']; ?></td>
+                                    <td><?php echo htmlspecialchars($c['sku'], ENT_QUOTES, 'UTF-8'); ?></td>
+                                    <td><?php echo htmlspecialchars($c['producto'], ENT_QUOTES, 'UTF-8'); ?></td>
+                                    <td><?php echo (int) $c['cantidad_vendida']; ?></td>
+                                    <td><?php echo $simbolo . number_format((float) $c['total_calculado'], 2, ',', '.'); ?></td>
+                                    <td><?php echo htmlspecialchars($c['fecha_fin'], ENT_QUOTES, 'UTF-8'); ?></td>
+                                    <td><?php echo htmlspecialchars($c['proveedor'], ENT_QUOTES, 'UTF-8'); ?></td>
+                                </tr>
+                            <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
 </div>
 
-<!-- Modal Nuevo registro -->
+<!-- Modal para nuevo registro -->
 <div class="modal fade" id="registroModal" tabindex="-1" aria-labelledby="registroModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-lg modal-dialog-centered">
         <div class="modal-content">
@@ -296,68 +288,6 @@ $hoy = new DateTimeImmutable('today');
     </div>
 </div>
 
-<!-- Modal Editar -->
-<div class="modal fade" id="editModal" tabindex="-1" aria-labelledby="editModalLabel" aria-hidden="true">
-    <div class="modal-dialog modal-lg modal-dialog-centered">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title" id="editModalLabel">Editar Registro</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
-            </div>
-            <form id="formEdit" novalidate>
-                <input type="hidden" name="id">
-                <div class="modal-body">
-                    <div class="row g-3">
-                        <div class="col-md-4">
-                            <label class="form-label">SKU</label>
-                            <input type="text" name="sku" class="form-control" list="list_skus" required>
-                        </div>
-                        <div class="col-md-8">
-                            <label class="form-label">Producto</label>
-                            <input type="text" name="producto" class="form-control" required>
-                        </div>
-                        <div class="col-md-3">
-                            <label class="form-label">Moneda</label>
-                            <select name="moneda" class="form-select" required>
-                                <option value="UYU">$ (UYU)</option>
-                                <option value="USD">U$D (USD)</option>
-                            </select>
-                        </div>
-                        <div class="col-md-3">
-                            <label class="form-label">Monto IVA</label>
-                            <input type="number" name="monto_iva" class="form-control" min="0" step="0.01" required>
-                        </div>
-                        <div class="col-md-3">
-                            <label class="form-label">Fecha Inicio</label>
-                            <input type="date" name="fecha_inicio" class="form-control" required>
-                        </div>
-                        <div class="col-md-3">
-                            <label class="form-label">Fecha Fin</label>
-                            <input type="date" name="fecha_fin" class="form-control" required>
-                        </div>
-                        <div class="col-md-4">
-                            <label class="form-label">Proveedor</label>
-                            <input type="text" name="proveedor" class="form-control" list="list_proveedores" required>
-                        </div>
-                        <div class="col-md-4">
-                            <label class="form-label">Cantidad Vendida</label>
-                            <input type="number" name="cantidad_vendida" class="form-control" min="0" step="1">
-                        </div>
-                        <div class="col-md-4">
-                            <label class="form-label">Notas</label>
-                            <input type="text" name="notas" class="form-control">
-                        </div>
-                    </div>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
-                    <button type="submit" class="btn btn-primary">Guardar cambios</button>
-                </div>
-            </form>
-        </div>
-    </div>
-</div>
-
 <!-- Modal Importar CSV -->
 <div class="modal fade" id="importModal" tabindex="-1" aria-labelledby="importModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-md modal-dialog-centered">
@@ -372,7 +302,7 @@ $hoy = new DateTimeImmutable('today');
                         <label class="form-label">Archivo CSV</label>
                         <input type="file" name="csv_file" class="form-control" accept=".csv,text/csv" required>
                         <div class="form-text">
-                            Encabezados esperados: SKU;Producto;Monto con IVA;Fecha inicio período;Fecha fin período;Proveedor / Marca;Reportada;Sell Out Pago;Cantidad Vendida;Notas. Separador ";"
+                            Encabezados: SKU;Nombre del producto;Monto con IVA;Fecha inicio período;Fecha fin período;Proveedor / Marca;Reportada;Sell Out Pago;Cantidad Vendida;Notas.
                         </div>
                         <div class="mt-2">
                             <a class="btn btn-link px-0" href="sample_csv.php" target="_blank" rel="noopener">Descargar CSV de ejemplo</a>
@@ -432,51 +362,11 @@ $hoy = new DateTimeImmutable('today');
 <datalist id="list_skus"></datalist>
 <datalist id="list_proveedores"></datalist>
 
-<!-- Modal Detalle Proveedor -->
-<div class="modal fade" id="detalleProveedorModal" tabindex="-1" aria-labelledby="detalleProveedorLabel" aria-hidden="true">
-    <div class="modal-dialog modal-lg modal-dialog-centered">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title" id="detalleProveedorLabel">Detalle por Proveedor</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
-            </div>
-            <div class="modal-body">
-                <div class="table-responsive">
-                    <table class="table table-sm align-middle mb-0" id="tablaDetalleProveedor">
-                        <thead>
-                        <tr>
-                            <th>SKU</th>
-                            <th>Producto</th>
-                            <th>Fecha</th>
-                            <th class="text-end">Monto</th>
-                        </tr>
-                        </thead>
-                        <tbody></tbody>
-                    </table>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
-<script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
-<script src="https://cdn.datatables.net/1.13.6/js/dataTables.bootstrap5.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11/dist/sweetalert2.all.min.js"></script>
 <script>
     $(function () {
-        const dt = $('#creditsTable').DataTable({
-            order: [[0, 'desc']],
-            pageLength: 10,
-            language: {url: 'https://cdn.datatables.net/plug-ins/1.13.6/i18n/es-ES.json'}
-        });
-
-        $('#filtroProveedor').on('change', function () {
-            const val = this.value;
-            dt.column(9).search(val).draw();
-        });
-
         cargarSugerencias();
         activarMayusculas();
         autocompletarSku();
@@ -488,30 +378,6 @@ $hoy = new DateTimeImmutable('today');
             formData.append('accion', 'nuevo_registro');
             await enviarFormData(formData, form);
         });
-
-        $('#formEdit').on('submit', async function (e) {
-            e.preventDefault();
-            const form = this;
-            const formData = new FormData(form);
-            formData.append('accion', 'update_credit');
-            await enviarFormData(formData, form);
-        });
-
-        async function enviarFormData(formData, form) {
-            const submitBtn = $(form).find('button[type="submit"]');
-            submitBtn.prop('disabled', true);
-            try {
-                const response = await fetch('actions.php', {method: 'POST', body: formData});
-                const data = await response.json();
-                if (!response.ok || !data.ok) throw new Error(data.message || 'Operación fallida.');
-                Swal.fire({icon: 'success', title: 'Listo', text: 'Cambios guardados', timer: 1500, showConfirmButton: false})
-                    .then(() => window.location.reload());
-            } catch (error) {
-                Swal.fire({icon: 'error', title: 'Error', text: error.message});
-            } finally {
-                submitBtn.prop('disabled', false);
-            }
-        }
 
         $('#formImport').on('submit', async function (e) {
             e.preventDefault();
@@ -561,6 +427,82 @@ $hoy = new DateTimeImmutable('today');
             await accionSimple({accion: 'delete_sku', sku}, 'SKU eliminado');
         });
 
+        // Reportar venta (Tab negociación)
+        $('.btn-reportar').on('click', async function () {
+            const id = $(this).data('id');
+            const {value: cantidad} = await Swal.fire({
+                title: 'Cantidad vendida',
+                input: 'number',
+                inputLabel: 'Ingrese Cantidad Vendida en el periodo',
+                inputAttributes: {min: 0, step: 1},
+                showCancelButton: true,
+                confirmButtonText: 'Guardar',
+                cancelButtonText: 'Cancelar'
+            });
+            if (cantidad === undefined) return;
+            const cantNum = parseInt(cantidad, 10);
+            if (isNaN(cantNum) || cantNum < 0) {
+                Swal.fire({icon: 'error', title: 'Cantidad inválida'});
+                return;
+            }
+            try {
+                const response = await fetch('actions.php', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+                    body: `accion=reportar_cantidad&id=${id}&cantidad=${cantNum}`
+                });
+                const data = await response.json();
+                if (!response.ok || !data.ok) throw new Error(data.message || 'No se pudo reportar.');
+                Swal.fire({icon: 'success', title: 'Reportado', timer: 1000, showConfirmButton: false})
+                    .then(() => window.location.reload());
+            } catch (error) {
+                Swal.fire({icon: 'error', title: 'Error', text: error.message});
+            }
+        });
+
+        // Confirmar cobro (Tab deuda)
+        $('.btn-cobro').on('click', async function () {
+            const id = $(this).data('id');
+            const conf = await Swal.fire({
+                icon: 'question',
+                title: 'Confirmar cobro',
+                text: '¿Marcar este acuerdo como pagado?',
+                showCancelButton: true,
+                confirmButtonText: 'Sí, confirmar',
+                cancelButtonText: 'Cancelar'
+            });
+            if (!conf.isConfirmed) return;
+            try {
+                const response = await fetch('actions.php', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+                    body: `accion=confirmar_cobro&id=${id}`
+                });
+                const data = await response.json();
+                if (!response.ok || !data.ok) throw new Error(data.message || 'No se pudo confirmar cobro.');
+                Swal.fire({icon: 'success', title: 'Cobrado', timer: 1000, showConfirmButton: false})
+                    .then(() => window.location.reload());
+            } catch (error) {
+                Swal.fire({icon: 'error', title: 'Error', text: error.message});
+            }
+        });
+
+        async function enviarFormData(formData, form) {
+            const submitBtn = $(form).find('button[type="submit"]');
+            submitBtn.prop('disabled', true);
+            try {
+                const response = await fetch('actions.php', {method: 'POST', body: formData});
+                const data = await response.json();
+                if (!response.ok || !data.ok) throw new Error(data.message || 'Operación fallida.');
+                Swal.fire({icon: 'success', title: 'Listo', text: 'Cambios guardados', timer: 1500, showConfirmButton: false})
+                    .then(() => window.location.reload());
+            } catch (error) {
+                Swal.fire({icon: 'error', title: 'Error', text: error.message});
+            } finally {
+                submitBtn.prop('disabled', false);
+            }
+        }
+
         async function accionSimple(payload, msgOk) {
             try {
                 const response = await fetch('actions.php', {
@@ -576,134 +518,6 @@ $hoy = new DateTimeImmutable('today');
                 Swal.fire({icon: 'error', title: 'Error', text: error.message});
             }
         }
-
-        // Toggle pagado pill
-        $('#creditsTable').on('click', '.pill-pago', async function () {
-            const btn = $(this);
-            const $row = btn.closest('tr');
-            const id = $row.data('id');
-            const estado = btn.data('state') === 1 ? 0 : 1;
-            try {
-                const response = await fetch('actions.php', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-                    body: `accion=actualizar_estado&id=${id}&campo=sell_out_pago&valor=${estado}`
-                });
-                const data = await response.json();
-                if (!response.ok || !data.ok) throw new Error(data.message || 'No se pudo actualizar.');
-                actualizarPill(btn, estado, 'Pagado', 'Pendiente');
-            } catch (error) {
-                Swal.fire({icon: 'error', title: 'Error', text: error.message});
-            }
-        });
-
-        // Toggle reportada pill con cantidad
-        $('#creditsTable').on('click', '.pill-reportada', async function () {
-            const btn = $(this);
-            const $row = btn.closest('tr');
-            const id = $row.data('id');
-            const state = btn.data('state');
-
-            if (state === 0) {
-                const {value: cantidad} = await Swal.fire({
-                    title: 'Cantidad vendida',
-                    input: 'number',
-                    inputLabel: 'Ingrese Cantidad Vendida en el periodo',
-                    inputAttributes: {min: 0, step: 1},
-                    showCancelButton: true,
-                    confirmButtonText: 'Guardar',
-                    cancelButtonText: 'Cancelar'
-                });
-                if (cantidad === undefined) return;
-                const cantNum = parseInt(cantidad, 10);
-                if (isNaN(cantNum) || cantNum < 0) {
-                    Swal.fire({icon: 'error', title: 'Cantidad inválida'});
-                    return;
-                }
-                try {
-                    const response = await fetch('actions.php', {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-                        body: `accion=reportar_cantidad&id=${id}&cantidad=${cantNum}`
-                    });
-                    const data = await response.json();
-                    if (!response.ok || !data.ok) throw new Error(data.message || 'No se pudo reportar.');
-                    actualizarPill(btn, 1, 'Listo', 'Pendiente');
-                    Swal.fire({icon: 'success', title: 'Reportado', timer: 1000, showConfirmButton: false})
-                        .then(() => window.location.reload());
-                } catch (error) {
-                    Swal.fire({icon: 'error', title: 'Error', text: error.message});
-                }
-            } else {
-                try {
-                    const response = await fetch('actions.php', {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-                        body: `accion=actualizar_estado&id=${id}&campo=reportada&valor=0`
-                    });
-                    const data = await response.json();
-                    if (!response.ok || !data.ok) throw new Error(data.message || 'No se pudo desmarcar.');
-                    actualizarPill(btn, 0, 'Listo', 'Pendiente');
-                } catch (error) {
-                    Swal.fire({icon: 'error', title: 'Error', text: error.message});
-                }
-            }
-        });
-
-        function actualizarPill(btn, estado, textoOn, textoOff) {
-            btn.data('state', estado);
-            if (estado === 1) {
-                btn.removeClass('pill-off').addClass('pill-on').text(textoOn);
-            } else {
-                btn.removeClass('pill-on').addClass('pill-off').text(textoOff);
-            }
-        }
-
-        // Editar
-        $('#creditsTable').on('click', '.btn-edit', function () {
-            const $row = $(this).closest('tr');
-            const modal = new bootstrap.Modal(document.getElementById('editModal'));
-            const form = document.getElementById('formEdit');
-            form.id.value = $row.data('id');
-            form.sku.value = $row.data('sku');
-            form.producto.value = $row.data('producto');
-            form.moneda.value = $row.data('moneda');
-            form.monto_iva.value = $row.data('monto');
-            form.fecha_inicio.value = $row.data('fecha-inicio');
-            form.fecha_fin.value = $row.data('fecha-fin');
-            form.proveedor.value = $row.data('proveedor');
-            form.cantidad_vendida.value = $row.data('cantidad');
-            form.notas.value = $row.data('notas');
-            modal.show();
-        });
-
-        // Eliminar
-        $('#creditsTable').on('click', '.btn-delete', async function () {
-            const $row = $(this).closest('tr');
-            const id = $row.data('id');
-            const conf = await Swal.fire({
-                icon: 'warning',
-                title: 'Eliminar',
-                text: '¿Seguro que deseas eliminar este registro?',
-                showCancelButton: true,
-                confirmButtonText: 'Sí, eliminar',
-                cancelButtonText: 'Cancelar'
-            });
-            if (!conf.isConfirmed) return;
-            try {
-                const response = await fetch('actions.php', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-                    body: `accion=delete_credit&id=${id}`
-                });
-                const data = await response.json();
-                if (!response.ok || !data.ok) throw new Error(data.message || 'No se pudo eliminar.');
-                Swal.fire({icon: 'success', title: 'Eliminado', timer: 1200, showConfirmButton: false})
-                    .then(() => window.location.reload());
-            } catch (error) {
-                Swal.fire({icon: 'error', title: 'Error', text: error.message});
-            }
-        });
 
         async function cargarSugerencias() {
             try {
@@ -739,8 +553,6 @@ $hoy = new DateTimeImmutable('today');
             const skuInput = document.querySelector('input[name="sku"]');
             if (!skuInput) return;
             skuInput.addEventListener('blur', () => consultarSku(skuInput, document.querySelector('input[name="producto"]'), document.querySelector('input[name="proveedor"]')));
-            const skuEdit = document.querySelector('#formEdit input[name="sku"]');
-            if (skuEdit) skuEdit.addEventListener('blur', () => consultarSku(skuEdit, document.querySelector('#formEdit input[name="producto"]'), document.querySelector('#formEdit input[name="proveedor"]')));
         }
 
         async function consultarSku(skuInput, productoInput, proveedorInput) {
@@ -762,44 +574,6 @@ $hoy = new DateTimeImmutable('today');
             } catch (error) {
                 console.error('Autocompletar SKU:', error);
             }
-        }
-
-        // Drill-down proveedor
-        $('.provider-detail').on('click', async function (e) {
-            e.preventDefault();
-            const proveedor = $(this).data('proveedor');
-            const estado = $(this).data('estado');
-            try {
-                const response = await fetch('actions.php', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-                    body: `accion=get_provider_details&proveedor=${encodeURIComponent(proveedor)}&estado=${estado}`
-                });
-                const data = await response.json();
-                if (!response.ok || !data.ok) throw new Error(data.message || 'No se pudo cargar el detalle.');
-                renderDetalleProveedor(data.items || [], proveedor, estado);
-            } catch (error) {
-                Swal.fire({icon: 'error', title: 'Error', text: error.message});
-            }
-        });
-
-        function renderDetalleProveedor(items, proveedor, estado) {
-            const tbody = $('#tablaDetalleProveedor tbody');
-            tbody.empty();
-            items.forEach(item => {
-                const simbolo = item.moneda === 'USD' ? 'U$D ' : '$ ';
-                const montoFmt = simbolo + Number(item.monto).toLocaleString('es-UY', {minimumFractionDigits: 2, maximumFractionDigits: 2});
-                const fecha = item.fecha || '';
-                tbody.append(`<tr>
-                    <td>${item.sku}</td>
-                    <td>${item.producto}</td>
-                    <td>${fecha}</td>
-                    <td class="text-end">${montoFmt}</td>
-                </tr>`);
-            });
-            $('#detalleProveedorLabel').text(`Detalle ${estado === 'pagado' ? 'Cobrado' : 'Pendiente'} - ${proveedor}`);
-            const modal = new bootstrap.Modal(document.getElementById('detalleProveedorModal'));
-            modal.show();
         }
     });
 </script>
