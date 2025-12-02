@@ -133,8 +133,16 @@ $hoy = new DateTimeImmutable('today');
                         <tr>
                             <td><?php echo htmlspecialchars($prov, ENT_QUOTES, 'UTF-8'); ?></td>
                             <td class="text-end"><?php echo (int) $r['unidades']; ?></td>
-                            <td class="text-end"><?php echo number_format($r['pendiente'], 2, ',', '.'); ?></td>
-                            <td class="text-end"><?php echo number_format($r['cobrado'], 2, ',', '.'); ?></td>
+                            <td class="text-end">
+                                <a href="#" class="link-light link-offset-1 text-decoration-none provider-detail" data-proveedor="<?php echo htmlspecialchars($prov, ENT_QUOTES, 'UTF-8'); ?>" data-estado="pendiente">
+                                    <?php echo number_format($r['pendiente'], 2, ',', '.'); ?>
+                                </a>
+                            </td>
+                            <td class="text-end">
+                                <a href="#" class="link-light link-offset-1 text-decoration-none provider-detail" data-proveedor="<?php echo htmlspecialchars($prov, ENT_QUOTES, 'UTF-8'); ?>" data-estado="pagado">
+                                    <?php echo number_format($r['cobrado'], 2, ',', '.'); ?>
+                                </a>
+                            </td>
                         </tr>
                     <?php endforeach; ?>
                     </tbody>
@@ -208,10 +216,14 @@ $hoy = new DateTimeImmutable('today');
                             <td><?php echo htmlspecialchars($c['fecha_fin'], ENT_QUOTES, 'UTF-8'); ?></td>
                             <td><?php echo htmlspecialchars($c['proveedor'], ENT_QUOTES, 'UTF-8'); ?></td>
                             <td class="text-center">
-                                <input type="checkbox" class="form-check-input toggle-reportada" <?php echo $c['reportada'] ? 'checked' : ''; ?>>
+                                <button type="button" class="btn btn-sm pill-status pill-reportada <?php echo $c['reportada'] ? 'pill-on' : 'pill-off'; ?>" data-state="<?php echo (int) $c['reportada']; ?>">
+                                    <?php echo $c['reportada'] ? 'Listo' : 'Pendiente'; ?>
+                                </button>
                             </td>
                             <td class="text-center">
-                                <input type="checkbox" class="form-check-input toggle-estado" data-campo="sell_out_pago" <?php echo $c['sell_out_pago'] ? 'checked' : ''; ?>>
+                                <button type="button" class="btn btn-sm pill-status pill-pago <?php echo $c['sell_out_pago'] ? 'pill-on' : 'pill-off'; ?>" data-state="<?php echo (int) $c['sell_out_pago']; ?>">
+                                    <?php echo $c['sell_out_pago'] ? 'Pagado' : 'Pendiente'; ?>
+                                </button>
                             </td>
                             <td><?php echo htmlspecialchars($c['notas'], ENT_QUOTES, 'UTF-8'); ?></td>
                             <td>
@@ -420,6 +432,33 @@ $hoy = new DateTimeImmutable('today');
 <datalist id="list_skus"></datalist>
 <datalist id="list_proveedores"></datalist>
 
+<!-- Modal Detalle Proveedor -->
+<div class="modal fade" id="detalleProveedorModal" tabindex="-1" aria-labelledby="detalleProveedorLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="detalleProveedorLabel">Detalle por Proveedor</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+            </div>
+            <div class="modal-body">
+                <div class="table-responsive">
+                    <table class="table table-sm align-middle mb-0" id="tablaDetalleProveedor">
+                        <thead>
+                        <tr>
+                            <th>SKU</th>
+                            <th>Producto</th>
+                            <th>Fecha</th>
+                            <th class="text-end">Monto</th>
+                        </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
@@ -538,35 +577,34 @@ $hoy = new DateTimeImmutable('today');
             }
         }
 
-        // Toggle pagado
-        $('#creditsTable').on('change', '.toggle-estado', async function () {
-            const checkbox = this;
-            const $row = $(checkbox).closest('tr');
+        // Toggle pagado pill
+        $('#creditsTable').on('click', '.pill-pago', async function () {
+            const btn = $(this);
+            const $row = btn.closest('tr');
             const id = $row.data('id');
-            const campo = $(checkbox).data('campo');
-            const valor = checkbox.checked ? 1 : 0;
+            const estado = btn.data('state') === 1 ? 0 : 1;
             try {
                 const response = await fetch('actions.php', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-                    body: `accion=actualizar_estado&id=${id}&campo=${campo}&valor=${valor}`
+                    body: `accion=actualizar_estado&id=${id}&campo=sell_out_pago&valor=${estado}`
                 });
                 const data = await response.json();
                 if (!response.ok || !data.ok) throw new Error(data.message || 'No se pudo actualizar.');
+                actualizarPill(btn, estado, 'Pagado', 'Pendiente');
             } catch (error) {
-                checkbox.checked = !checkbox.checked;
                 Swal.fire({icon: 'error', title: 'Error', text: error.message});
             }
         });
 
-        // Toggle reportada con cantidad
-        $('#creditsTable').on('change', '.toggle-reportada', async function () {
-            const checkbox = this;
-            const $row = $(checkbox).closest('tr');
+        // Toggle reportada pill con cantidad
+        $('#creditsTable').on('click', '.pill-reportada', async function () {
+            const btn = $(this);
+            const $row = btn.closest('tr');
             const id = $row.data('id');
+            const state = btn.data('state');
 
-            if (checkbox.checked) {
-                checkbox.checked = false; // se marcará si confirma
+            if (state === 0) {
                 const {value: cantidad} = await Swal.fire({
                     title: 'Cantidad vendida',
                     input: 'number',
@@ -590,13 +628,13 @@ $hoy = new DateTimeImmutable('today');
                     });
                     const data = await response.json();
                     if (!response.ok || !data.ok) throw new Error(data.message || 'No se pudo reportar.');
-                    Swal.fire({icon: 'success', title: 'Reportado', timer: 1200, showConfirmButton: false})
+                    actualizarPill(btn, 1, 'Listo', 'Pendiente');
+                    Swal.fire({icon: 'success', title: 'Reportado', timer: 1000, showConfirmButton: false})
                         .then(() => window.location.reload());
                 } catch (error) {
                     Swal.fire({icon: 'error', title: 'Error', text: error.message});
                 }
             } else {
-                // Desmarcar: resetea reportada y cantidad
                 try {
                     const response = await fetch('actions.php', {
                         method: 'POST',
@@ -605,12 +643,21 @@ $hoy = new DateTimeImmutable('today');
                     });
                     const data = await response.json();
                     if (!response.ok || !data.ok) throw new Error(data.message || 'No se pudo desmarcar.');
+                    actualizarPill(btn, 0, 'Listo', 'Pendiente');
                 } catch (error) {
-                    checkbox.checked = !checkbox.checked;
                     Swal.fire({icon: 'error', title: 'Error', text: error.message});
                 }
             }
         });
+
+        function actualizarPill(btn, estado, textoOn, textoOff) {
+            btn.data('state', estado);
+            if (estado === 1) {
+                btn.removeClass('pill-off').addClass('pill-on').text(textoOn);
+            } else {
+                btn.removeClass('pill-on').addClass('pill-off').text(textoOff);
+            }
+        }
 
         // Editar
         $('#creditsTable').on('click', '.btn-edit', function () {
@@ -715,6 +762,44 @@ $hoy = new DateTimeImmutable('today');
             } catch (error) {
                 console.error('Autocompletar SKU:', error);
             }
+        }
+
+        // Drill-down proveedor
+        $('.provider-detail').on('click', async function (e) {
+            e.preventDefault();
+            const proveedor = $(this).data('proveedor');
+            const estado = $(this).data('estado');
+            try {
+                const response = await fetch('actions.php', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+                    body: `accion=get_provider_details&proveedor=${encodeURIComponent(proveedor)}&estado=${estado}`
+                });
+                const data = await response.json();
+                if (!response.ok || !data.ok) throw new Error(data.message || 'No se pudo cargar el detalle.');
+                renderDetalleProveedor(data.items || [], proveedor, estado);
+            } catch (error) {
+                Swal.fire({icon: 'error', title: 'Error', text: error.message});
+            }
+        });
+
+        function renderDetalleProveedor(items, proveedor, estado) {
+            const tbody = $('#tablaDetalleProveedor tbody');
+            tbody.empty();
+            items.forEach(item => {
+                const simbolo = item.moneda === 'USD' ? 'U$D ' : '$ ';
+                const montoFmt = simbolo + Number(item.monto).toLocaleString('es-UY', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+                const fecha = item.fecha || '';
+                tbody.append(`<tr>
+                    <td>${item.sku}</td>
+                    <td>${item.producto}</td>
+                    <td>${fecha}</td>
+                    <td class="text-end">${montoFmt}</td>
+                </tr>`);
+            });
+            $('#detalleProveedorLabel').text(`Detalle ${estado === 'pagado' ? 'Cobrado' : 'Pendiente'} - ${proveedor}`);
+            const modal = new bootstrap.Modal(document.getElementById('detalleProveedorModal'));
+            modal.show();
         }
     });
 </script>

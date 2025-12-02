@@ -64,6 +64,10 @@ try {
             requireLogin();
             eliminarSku($pdo);
             break;
+        case 'get_provider_details':
+            requireLogin();
+            obtenerDetallesProveedor($pdo);
+            break;
         default:
             http_response_code(400);
             echo json_encode(['ok' => false, 'message' => 'Acción no reconocida']);
@@ -435,6 +439,42 @@ function eliminarSku(PDO $pdo): void
     $stmt = $pdo->prepare("DELETE FROM catalog_skus WHERE sku = :sku");
     $stmt->execute([':sku' => $sku]);
     echo json_encode(['ok' => true]);
+}
+
+function obtenerDetallesProveedor(PDO $pdo): void
+{
+    $proveedor = normalize_upper($_POST['proveedor'] ?? '');
+    $estado = $_POST['estado'] ?? '';
+    if ($proveedor === '' || !in_array($estado, ['pendiente', 'pagado'], true)) {
+        http_response_code(422);
+        echo json_encode(['ok' => false, 'message' => 'Parámetros inválidos']);
+        return;
+    }
+
+    $filtro = $estado === 'pagado'
+        ? 'sell_out_pago = 1'
+        : 'sell_out_pago = 0 AND reportada = 1';
+
+    $stmt = $pdo->prepare("
+        SELECT sku, producto, fecha_fin AS fecha, monto_iva, cantidad_vendida, moneda
+        FROM sellout_credits
+        WHERE proveedor = :proveedor AND {$filtro}
+    ");
+    $stmt->execute([':proveedor' => $proveedor]);
+    $rows = $stmt->fetchAll();
+    $items = [];
+    foreach ($rows as $r) {
+        $total = (float) $r['monto_iva'] * (int) $r['cantidad_vendida'];
+        $items[] = [
+            'sku' => normalize_upper($r['sku']),
+            'producto' => normalize_upper($r['producto']),
+            'fecha' => $r['fecha'],
+            'monto' => $total,
+            'moneda' => normalize_upper($r['moneda']),
+        ];
+    }
+
+    echo json_encode(['ok' => true, 'items' => $items]);
 }
 
 function normalize_upper(string $value): string
